@@ -4,6 +4,8 @@ import { neonDb } from '../services/neonDb';
 import { useAuth } from './AuthContext';
 import { deviceIsOnline, readOfflineCatalog, saveOfflineCatalog } from '../services/offlineCatalog';
 import { readStorage, writeStorage, readStoredArray, readStoredJson, writeStoredJson } from '../utils/browserStorage';
+import { getOrCaptureVisitorAttribution, type VisitorAttribution } from '../utils/visitorAttribution';
+import { applyPageSeo, buildStoreJsonLd } from '../utils/seo';
 
 export type AppTab =
   | 'home'
@@ -148,6 +150,9 @@ interface StoreContextType {
   navigate: (tab: AppTab, options?: { category?: string; search?: string; product?: Product; productHandle?: string }) => void;
   openProduct: (product: Product) => void;
   sessionId: string;
+  visitorAttribution: VisitorAttribution;
+  recentlyViewedIds: string[];
+  clearRecentlyViewed: () => void;
 }
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
@@ -179,6 +184,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [cart, setCart] = useState<CartItem[]>(() => readStoredArray<CartItem>('qamar_cart'));
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [wishlist, setWishlist] = useState<string[]>(() => readStoredArray<string>('qamar_wishlist'));
+  const [recentlyViewedIds, setRecentlyViewedIds] = useState<string[]>(() => readStoredArray<string>('qamar_recently_viewed'));
+  const [visitorAttribution, setVisitorAttribution] = useState<VisitorAttribution>(() => getOrCaptureVisitorAttribution());
   const [orders, setOrders] = useState<Order[]>([]);
   const [currentOrder, setCurrentOrder] = useState<Order | null>(null);
   const [activeCarts, setActiveCarts] = useState<any[]>([]);
@@ -278,15 +285,25 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const lastTrackedProductIdRef = React.useRef<string>('');
   useEffect(() => {
-    if (currentTab !== 'product' || !selectedProduct?.id || !deviceIsOnline()) return;
+    if (currentTab !== 'product' || !selectedProduct?.id) return;
+    setRecentlyViewedIds(prev => {
+      const next = [selectedProduct.id, ...prev.filter(id => id !== selectedProduct.id)].slice(0, 15);
+      writeStoredJson('qamar_recently_viewed', next);
+      return next;
+    });
+    if (!deviceIsOnline()) return;
     if (lastTrackedProductIdRef.current === selectedProduct.id) return;
     lastTrackedProductIdRef.current = selectedProduct.id;
     neonDb
       .trackActivity({
         sessionId,
         customerId: account?.id,
+        customerName: account?.name,
+        customerPhone: account?.phone,
+        customerEmail: account?.email,
         actionType: 'view_product',
         targetId: selectedProduct.id,
+        attribution: visitorAttribution,
         metadata: {
           category: selectedProduct.category,
           name_ar: selectedProduct.name_ar,
@@ -296,7 +313,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       })
       .catch(() => {});
-  }, [currentTab, selectedProduct?.id, sessionId, account?.id]);
+  }, [currentTab, selectedProduct?.id, sessionId, account?.id, account?.name, account?.phone, account?.email, visitorAttribution]);
 
   // Persist cart & sync active cart
   useEffect(() => {
@@ -311,23 +328,71 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         customerName: account?.name,
         customerPhone: account?.phone,
         items: cart,
-        subtotal: sub
+        subtotal: sub,
+        attribution: visitorAttribution
       })
       .catch(() => {});
-  }, [cart, sessionId, account?.id, account?.email, account?.name, account?.phone]);
+  }, [cart, sessionId, account?.id, account?.email, account?.name, account?.phone, visitorAttribution]);
 
-  // Link anonymous session activity and refresh user last_seen_at on auth state ready
+  // Capture visitor traffic (registered & guest), attribute ad/search source, and hydrate recently viewed history
+  const pingSentRef = React.useRef<string>('');
   useEffect(() => {
-    if (!sessionReady || !account?.id || !deviceIsOnline()) return;
+    if (!sessionReady || !deviceIsOnline()) return;
+    const pingKey = `${account?.id || 'guest'}:${currentTab}`;
+    if (pingSentRef.current === pingKey) return;
+    pingSentRef.current = pingKey;
+
+    const latestAttr = getOrCaptureVisitorAttribution();
+    setVisitorAttribution(latestAttr);
+
     neonDb
       .trackActivity({
         sessionId,
-        customerId: account.id,
-        actionType: 'session_ping',
-        targetId: typeof window !== 'undefined' ? window.location.pathname : '/ar'
+        customerId: account?.id,
+        customerName: account?.name,
+        customerPhone: account?.phone,
+        customerEmail: account?.email,
+        actionType: account?.id ? 'session_ping' : 'page_visit',
+        targetId: typeof window !== 'undefined' ? window.location.pathname : '/ar',
+        attribution: latestAttr
       })
       .catch(() => {});
-  }, [sessionReady, account?.id, sessionId]);
+
+    neonDb.getRecentlyViewedProductIds(sessionId).then(ids => {
+      if (!Array.isArray(ids) || !ids.length) return;
+      setRecentlyViewedIds(prev => {
+        const merged = Array.from(new Set([...prev, ...ids])).slice(0, 15);
+        writeStoredJson('qamar_recently_viewed', merged);
+        return merged;
+      });
+    }).catch(() => {});
+  }, [sessionReady, account?.id, sessionId, currentTab]);
+
+  // Keep global document SEO & Store JSON-LD synchronized on Storefront routes
+  useEffect(() => {
+    if (currentTab === 'product' || currentTab === 'admin' || typeof window === 'undefined') return;
+    const origin = window.location.origin;
+    const titles: Record<string, string> = {
+      home: `${settings.store_name_ar || 'قمر للعطور'} | Qamar Fragrances — عطور محاكاة فاخرة`,
+      shop: `${selectedCategory && selectedCategory !== 'all' ? selectedCategory.replace(/-/g, ' ') : 'جميع العطور'} | قمر للعطور`,
+      contact: 'تواصل معنا | قمر للعطور',
+      cart: 'سلة التسوق | قمر للعطور',
+      checkout: 'إتمام الطلب | قمر للعطور',
+      'order-success': 'تم تأكيد الطلب | قمر للعطور',
+      'track-order': 'تتبع طلبك | قمر للعطور',
+      profile: 'حسابي | قمر للعطور',
+      terms: 'شروط الاستخدام | قمر للعطور',
+      privacy: 'سياسة الخصوصية | قمر للعطور',
+      refund: 'سياسة الاستبدال والاسترجاع | قمر للعطور',
+      shipping: 'سياسة الشحن والتوصيل | قمر للعطور'
+    };
+    applyPageSeo({
+      title: titles[currentTab] || 'قمر للعطور | Qamar Fragrances',
+      description: settings.tagline_ar || 'عطور محاكاة بجودة مطابقة للأوريجينال - قمر للعطور',
+      image: settings.logo_url || '/qamar-images/626c06f2fe557fd9.webp',
+      jsonLd: currentTab === 'home' ? buildStoreJsonLd(origin, settings) : undefined
+    });
+  }, [currentTab, selectedCategory, settings]);
 
   useEffect(() => { writeStoredJson('qamar_wishlist', wishlist); }, [wishlist]);
 
@@ -437,6 +502,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const orderNumber = `QMR-${new Date().getFullYear()}-${String(Math.floor(100000 + Math.random() * 900000))}`;
     const order: Order = {
       ...orderData,
+      session_id: sessionId,
       id: orderId,
       order_number: orderNumber,
       tracking_number: orderNumber,
@@ -561,7 +627,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       selectedProduct,
       navigate,
       openProduct,
-      sessionId
+      sessionId,
+      visitorAttribution,
+      recentlyViewedIds,
+      clearRecentlyViewed: () => {
+        setRecentlyViewedIds([]);
+        writeStoredJson('qamar_recently_viewed', []);
+      }
     }}>
       {children}
     </StoreContext.Provider>

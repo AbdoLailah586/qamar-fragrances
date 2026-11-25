@@ -60,6 +60,12 @@ export const neonDb = {
   },
   async getAllUsers() { return callStore('getAllUsers'); },
   async getUserInsights(userId: string) { return callAction('getUserInsights', [userId]); },
+  async getGuestVisitors(limit = 120) { return callStore('getGuestVisitors', [limit]); },
+  async getGuestInsights(sessionId: string) { return callAction('getGuestInsights', [sessionId]); },
+  async deleteGuestVisitor(sessionId: string) { return callAction('deleteGuestVisitor', [sessionId]); },
+  async getRecentlyViewedProductIds(sessionId: string) {
+    try { return await callStore('getRecentlyViewedProductIds', [sessionId]); } catch { return []; }
+  },
   async adminCreateUser(data: { name: string; email: string; phone?: string; password: string; role: 'admin' | 'customer'; permissions?: string[] }) {
     return callAction('adminCreateUser', [data]);
   },

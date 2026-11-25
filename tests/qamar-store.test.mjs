@@ -40,6 +40,9 @@ const googleAuthApi = await import(pathToFileURL(resolve(ROOT, 'api/google-auth.
 const arabic = await import(pathToFileURL(resolve(ROOT, 'src/utils/arabicNumbers.ts')).href);
 const delivery = await import(pathToFileURL(resolve(ROOT, 'src/utils/deliveryAddress.ts')).href);
 const egyptLocation = await import(pathToFileURL(resolve(ROOT, 'src/utils/egyptLocation.ts')).href);
+const attribution = await import(pathToFileURL(resolve(ROOT, 'src/utils/visitorAttribution.ts')).href);
+const seo = await import(pathToFileURL(resolve(ROOT, 'src/utils/seo.ts')).href);
+const sitemapApi = await import(pathToFileURL(resolve(ROOT, 'api/sitemap.js')).href);
 const storeApi = await import(pathToFileURL(resolve(ROOT, 'api/store.ts')).href);
 const whatsappCrm = await import(pathToFileURL(resolve(ROOT, 'server/whatsappCrm.ts')).href);
 
@@ -916,5 +919,120 @@ describe('Admin WhatsApp Alert on New Orders', () => {
     assert.match(sysSrc, /auto_alert_admin_on_order/);
     assert.match(sysSrc, /admin_alert_whatsapp_number/);
     assert.match(sysSrc, /تنبيه فوري للأدمن على الواتساب عند وصول أي طلب جديد/);
+  });
+});
+
+describe('Guest Tracking, Ad Attribution, SEO & Home Recently Viewed', () => {
+  test('detectVisitorAttribution accurately classifies Facebook, Instagram, TikTok, Google Ads/Search, and device type', () => {
+    const fb = attribution.detectVisitorAttribution({
+      search: '?utm_source=facebook&utm_medium=cpc&utm_campaign=ramadan_oud&fbclid=IwAR123',
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile/15E148',
+      pathname: '/ar/shop'
+    });
+    assert.equal(fb.source_channel, 'facebook_ads');
+    assert.match(fb.source_label, /إعلان فيسبوك/);
+    assert.equal(fb.utm_campaign, 'ramadan_oud');
+    assert.match(fb.device_type, /موبايل/);
+
+    const ig = attribution.detectVisitorAttribution({
+      referrer: 'https://l.instagram.com/',
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      pathname: '/ar'
+    });
+    assert.equal(ig.source_channel, 'instagram');
+    assert.match(ig.source_label, /إنستجرام/);
+    assert.match(ig.device_type, /Desktop/);
+
+    const tt = attribution.detectVisitorAttribution({
+      search: '?ttclid=abc999&utm_campaign=megamare_video',
+      pathname: '/ar/product/all/megamare'
+    });
+    assert.equal(tt.source_channel, 'tiktok_ads');
+    assert.match(tt.source_label, /إعلان تيك توك/);
+
+    const gSearch = attribution.detectVisitorAttribution({
+      referrer: 'https://www.google.com/',
+      pathname: '/ar'
+    });
+    assert.equal(gSearch.source_channel, 'google_search');
+    assert.match(gSearch.source_label, /بحث جوجل/);
+
+    const gAds = attribution.detectVisitorAttribution({
+      search: '?gclid=CjwKCAiA',
+      pathname: '/ar'
+    });
+    assert.equal(gAds.source_channel, 'google_ads');
+    assert.match(gAds.source_label, /إعلان جوجل/);
+  });
+
+  test('getGuestVisitors, getGuestInsights, and deleteGuestVisitor enforce RBAC safely', async () => {
+    const customer = { id: 'usr-c', email: 'c@qamar.com', role: 'customer', admin_permissions: [] };
+    const crmStaff = { id: 'usr-s', email: 'crm@qamar.com', role: 'customer', admin_permissions: ['crm'] };
+    const fullAdmin = { id: 'usr-a', email: 'admin@qamar.com', role: 'admin', admin_permissions: [] };
+    const fakeStore = {
+      async getGuestVisitors() { return [{ session_id: 'qmr_123', source_channel: 'tiktok_ads', views_count: 4 }]; },
+      async getGuestInsights(sid) { return { success: true, guest: { session_id: sid }, recentViews: [], orders: [] }; },
+      async deleteGuestVisitor(sid) { return { success: true, sid }; }
+    };
+
+    const r403 = createMockRes();
+    await storeApi.default(createMockReq({ method: 'POST', headers: { origin: 'https://qamar-fragrances.com' }, body: { method: 'getGuestVisitors', args: [] } }), r403, { sql: async () => [], store: fakeStore, user: customer });
+    assert.equal(r403.statusCode, 403);
+
+    const rGuests = createMockRes();
+    await storeApi.default(createMockReq({ method: 'POST', headers: { origin: 'https://qamar-fragrances.com' }, body: { method: 'getGuestVisitors', args: [] } }), rGuests, { sql: async () => [], store: fakeStore, user: crmStaff });
+    assert.equal(rGuests.statusCode, 200);
+    assert.equal(rGuests.body.result[0].source_channel, 'tiktok_ads');
+
+    const rDelDenied = createMockRes();
+    await storeApi.default(createMockReq({ method: 'POST', headers: { origin: 'https://qamar-fragrances.com' }, body: { method: 'deleteGuestVisitor', args: ['qmr_123'] } }), rDelDenied, { sql: async () => [], store: fakeStore, user: crmStaff });
+    assert.equal(rDelDenied.statusCode, 403);
+
+    const rDelOk = createMockRes();
+    await storeApi.default(createMockReq({ method: 'POST', headers: { origin: 'https://qamar-fragrances.com' }, body: { method: 'deleteGuestVisitor', args: ['qmr_123'] } }), rDelOk, { sql: async () => [], store: fakeStore, user: fullAdmin });
+    assert.equal(rDelOk.statusCode, 200);
+  });
+
+  test('SEO JSON-LD Product/Store schemas, sitemap.xml, robots.txt, and Home Recently Viewed section work cleanly', async () => {
+    const productSchemas = seo.buildProductJsonLd('https://qamar-fragrances.com', {
+      id: 'p1',
+      handle: 'sauvage-elixir',
+      sku: 'QMR-01',
+      name_ar: 'سوفاج اليكسير',
+      name_en: 'Sauvage Elixir',
+      category: 'عطور-رجالى-ديزاينر',
+      brand: 'Dior / Qamar',
+      price: 350,
+      in_stock: true,
+      variants: [{ label: '30ml', price: 250 }, { label: '50ml', price: 350 }],
+      images: ['/qamar-images/test.webp']
+    }, { store_name_ar: 'قمر للعطور' }, [{ rating: 5, status: 'approved' }]);
+    assert.equal(productSchemas[0]['@type'], 'Product');
+    assert.equal(productSchemas[0].offers['@type'], 'AggregateOffer');
+    assert.equal(productSchemas[0].offers.priceCurrency, 'EGP');
+    assert.equal(productSchemas[0].aggregateRating.ratingValue, 5);
+    assert.equal(productSchemas[1]['@type'], 'BreadcrumbList');
+
+    let xmlBody = '';
+    const sRes = {
+      setHeader() {},
+      status() { return this; },
+      send(body) { xmlBody = body; return this; }
+    };
+    await sitemapApi.default({ headers: { host: 'qamar-fragrances.com', 'x-forwarded-proto': 'https' } }, sRes);
+    assert.match(xmlBody, /<urlset/);
+    assert.match(xmlBody, /https:\/\/qamar-fragrances\.com\/ar\/shop/);
+    assert.match(xmlBody, /https:\/\/qamar-fragrances\.com\/ar\/privacy-policy/);
+
+    const robots = readFileSync(resolve(ROOT, 'public/robots.txt'), 'utf8');
+    const vercelCfg = readFileSync(resolve(ROOT, 'vercel.json'), 'utf8');
+    const homeSrc = readFileSync(resolve(ROOT, 'src/pages/Home.tsx'), 'utf8');
+    const crmSrc = readFileSync(resolve(ROOT, 'src/pages/admin/UsersCrmPanel.tsx'), 'utf8');
+
+    assert.match(robots, /Sitemap: https:\/\/qamar-fragrances\.com\/sitemap\.xml/);
+    assert.match(vercelCfg, /\/sitemap\.xml/);
+    assert.match(homeSrc, /عطور زرتها مؤخراً/);
+    assert.match(homeSrc, /home-recently-viewed/);
+    assert.match(crmSrc, /الزوار بدون حساب/);
   });
 });

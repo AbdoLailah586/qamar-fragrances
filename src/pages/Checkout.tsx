@@ -1,4 +1,4 @@
-import React, { Suspense, useRef, useState } from 'react';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
 import confetti from 'canvas-confetti';
 import { Truck, CreditCard, ShieldCheck, CheckCircle2, Navigation, MapPin, Loader2, ExternalLink, X } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
@@ -7,12 +7,13 @@ import { egyptianGovernorates } from '../data/governorates';
 import { formatEGP } from '../utils/arabicNumbers';
 import { coordsToGoogleMapsUrl, isGoogleMapsUrl, normalizePhone } from '../utils/deliveryAddress';
 import { reverseGeocodeCoords } from '../utils/egyptLocation';
+import { neonDb } from '../services/neonDb';
 import type { PaymentMethod } from '../types';
 
 const LocationPickerMap = React.lazy(() => import('../components/LocationPickerMap'));
 
 export const Checkout: React.FC = () => {
-  const { cart, cartSubtotal, settings, createOrder, navigate } = useStore();
+  const { cart, cartSubtotal, settings, createOrder, navigate, sessionId, visitorAttribution } = useStore();
   const { user } = useAuth();
 
   const [customerName, setCustomerName] = useState(user?.name || '');
@@ -33,6 +34,27 @@ export const Checkout: React.FC = () => {
   const [paymentReference, setPaymentReference] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  // Early capture of guest name/phone into active_carts & visitor_sessions for CRM abandoned-cart follow-up
+  useEffect(() => {
+    if (user || cart.length === 0) return;
+    const trimmedName = customerName.trim();
+    const normalizedPhone = normalizePhone(customerPhone);
+    if (!trimmedName && normalizedPhone.length < 10) return;
+    const timer = window.setTimeout(() => {
+      neonDb
+        .syncActiveCart({
+          sessionId,
+          customerName: trimmedName || undefined,
+          customerPhone: normalizedPhone.length >= 10 ? normalizedPhone : undefined,
+          items: cart,
+          subtotal: cartSubtotal,
+          attribution: visitorAttribution
+        })
+        .catch(() => {});
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [user, cart, cartSubtotal, customerName, customerPhone, sessionId, visitorAttribution]);
 
   const applyCoordinates = async (lat: number, lng: number, source: 'gps' | 'map') => {
     const cleanLat = Number(lat.toFixed(6));

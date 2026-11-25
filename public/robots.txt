@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /ar/admin
+Disallow: /api/
+
+Sitemap: https://qamar-fragrances.com/sitemap.xml

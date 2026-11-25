@@ -4,6 +4,7 @@ import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { neonDb } from '../services/neonDb';
 import { formatEGP } from '../utils/arabicNumbers';
+import { applyPageSeo, buildProductJsonLd } from '../utils/seo';
 import { ProductCard } from '../components/ProductCard';
 import type { FragranceNotesEntry } from '../types';
 
@@ -11,6 +12,7 @@ export const ProductDetails: React.FC = () => {
   const {
     products,
     selectedProduct,
+    settings,
     addToCart,
     buyNow,
     navigate,
@@ -53,6 +55,22 @@ export const ProductDetails: React.FC = () => {
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
+
+  useEffect(() => {
+    if (!product || typeof window === 'undefined') return;
+    const origin = window.location.origin;
+    const desc =
+      product.description_ar?.trim() ||
+      `اطلب عطر ${product.name_ar} بسعر ${product.price} ج.م. من متجر ${settings.store_name_ar || 'قمر للعطور'} بثبات وفوحان فائق.`;
+    applyPageSeo({
+      title: `${product.name_ar} | قمر للعطور Qamar Fragrances`,
+      description: desc.slice(0, 160),
+      path: `/ar/product/all/${encodeURIComponent(product.handle)}`,
+      image: product.images?.[0],
+      type: 'product',
+      jsonLd: buildProductJsonLd(origin, product, settings, reviews)
+    });
+  }, [product, settings, reviews]);
 
   const related = useMemo(() => {
     if (!product) return [];

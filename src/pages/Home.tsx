@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { ChevronLeft, ChevronRight, Clock, Trash2 } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { ProductCard } from '../components/ProductCard';
 import { whatsappUrl } from '../utils/whatsappService';
 
 export const Home: React.FC = () => {
-  const { products, collections, settings, isCatalogLoading, navigate } = useStore();
+  const { products, collections, settings, isCatalogLoading, recentlyViewedIds, clearRecentlyViewed, navigate } = useStore();
   const [slideOffset, setSlideOffset] = useState(0);
 
   const visibleCollections = collections.slice(0, 6);
@@ -22,6 +22,15 @@ export const Home: React.FC = () => {
   const fallbackFeatured = featuredProducts.length > 0
     ? featuredProducts
     : products.filter(p => p.is_active !== false).slice(0, 12);
+
+  const recentlyViewedProducts = useMemo(() => {
+    if (!recentlyViewedIds.length || !products.length) return [];
+    const byId = new Map(products.map(p => [p.id, p]));
+    return recentlyViewedIds
+      .map(id => byId.get(id))
+      .filter((p): p is NonNullable<typeof p> => Boolean(p && p.is_active !== false))
+      .slice(0, 8);
+  }, [recentlyViewedIds, products]);
 
   return (
     <main className="w-full bg-white pb-6 md:pb-0">
@@ -198,6 +207,33 @@ export const Home: React.FC = () => {
           </div>
         )}
       </section>
+
+      {/* 4. Recently Viewed Perfumes Personalized Per User/Visitor */}
+      {recentlyViewedProducts.length > 0 && (
+        <section data-testid="home-recently-viewed" className="max-w-[1320px] mx-auto px-4 md:px-8 pt-6 pb-8">
+          <div className="flex items-center justify-between gap-2 mb-5">
+            <h2 className="text-lg md:text-2xl font-bold text-[#252a31] flex items-center gap-2">
+              <Clock className="w-5 h-5 text-[#fe9931]" />
+              <span>عطور زرتها مؤخراً</span>
+              <span className="text-xs font-bold text-gray-400">({recentlyViewedProducts.length})</span>
+            </h2>
+            <button
+              type="button"
+              onClick={clearRecentlyViewed}
+              className="text-xs font-bold text-gray-400 hover:text-red-500 inline-flex items-center gap-1 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>مسح السجل</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 md:gap-7">
+            {recentlyViewedProducts.map((p, idx) => (
+              <ProductCard key={`recent-${p.id}`} product={p} index={idx} />
+            ))}
+          </div>
+        </section>
+      )}
     </main>
   );
 };

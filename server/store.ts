@@ -24,8 +24,150 @@ async function ensureUserCrmColumns() {
     await sql`ALTER TABLE active_carts ADD COLUMN IF NOT EXISTS customer_id VARCHAR(100);`;
     await sql`ALTER TABLE active_carts ADD COLUMN IF NOT EXISTS customer_email VARCHAR(255);`;
     await sql`CREATE INDEX IF NOT EXISTS customer_activity_customer_idx ON customer_activity(customer_id, created_at DESC);`;
+    await sql`
+      CREATE TABLE IF NOT EXISTS visitor_sessions (
+        session_id VARCHAR(120) PRIMARY KEY,
+        customer_id VARCHAR(100),
+        customer_name VARCHAR(200),
+        customer_phone VARCHAR(40),
+        customer_email VARCHAR(255),
+        source_channel VARCHAR(80) NOT NULL DEFAULT 'direct',
+        source_label VARCHAR(120) NOT NULL DEFAULT 'دخول مباشر / تطبيق المتجر',
+        utm_source VARCHAR(150),
+        utm_medium VARCHAR(150),
+        utm_campaign VARCHAR(200),
+        referrer TEXT,
+        device_type VARCHAR(60),
+        landing_path TEXT,
+        last_path TEXT,
+        first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS visitor_sessions_seen_idx ON visitor_sessions(last_seen_at DESC);`;
+    await sql`CREATE INDEX IF NOT EXISTS visitor_sessions_customer_idx ON visitor_sessions(customer_id);`;
+    await sql`
+      INSERT INTO visitor_sessions (session_id, customer_name, customer_phone, first_seen_at, last_seen_at)
+      SELECT ac.session_id, ac.customer_name, ac.customer_phone, ac.last_updated_at, ac.last_updated_at
+      FROM active_carts ac
+      WHERE ac.customer_id IS NULL
+      ON CONFLICT (session_id) DO NOTHING;
+    `;
+    await sql`
+      INSERT INTO visitor_sessions (session_id, first_seen_at, last_seen_at)
+      SELECT ca.session_id, MIN(ca.created_at), MAX(ca.created_at)
+      FROM customer_activity ca
+      WHERE ca.customer_id IS NULL
+      GROUP BY ca.session_id
+      ON CONFLICT (session_id) DO NOTHING;
+    `;
     userCrmSchemaEnsured = true;
   } catch {}
+}
+
+async function upsertVisitorSession(data: {
+  sessionId?: string;
+  customerId?: string;
+  customerName?: string;
+  customerPhone?: string;
+  customerEmail?: string;
+  attribution?: any;
+}) {
+  const sid = String(data.sessionId || '').trim().slice(0, 120);
+  if (!sid) return;
+  const attr = data.attribution || {};
+  const channel = String(attr.source_channel || 'direct').slice(0, 80);
+  const label = String(attr.source_label || 'دخول مباشر / تطبيق المتجر').slice(0, 120);
+  const utmSource = attr.utm_source ? String(attr.utm_source).slice(0, 150) : null;
+  const utmMedium = attr.utm_medium ? String(attr.utm_medium).slice(0, 150) : null;
+  const utmCampaign = attr.utm_campaign ? String(attr.utm_campaign).slice(0, 200) : null;
+  const referrer = attr.referrer ? String(attr.referrer).slice(0, 300) : null;
+  const deviceType = attr.device_type ? String(attr.device_type).slice(0, 60) : null;
+  const landingPath = attr.landing_path ? String(attr.landing_path).slice(0, 300) : null;
+  const lastPath = attr.last_path ? String(attr.last_path).slice(0, 300) : null;
+
+  try {
+    await sql`
+      INSERT INTO visitor_sessions (
+        session_id, customer_id, customer_name, customer_phone, customer_email,
+        source_channel, source_label, utm_source, utm_medium, utm_campaign,
+        referrer, device_type, landing_path, last_path, first_seen_at, last_seen_at
+      )
+      VALUES (
+        ${sid}, ${data.customerId || null}, ${data.customerName || null}, ${data.customerPhone || null}, ${data.customerEmail || null},
+        ${channel}, ${label}, ${utmSource}, ${utmMedium}, ${utmCampaign},
+        ${referrer}, ${deviceType}, ${landingPath}, ${lastPath}, NOW(), NOW()
+      )
+      ON CONFLICT (session_id) DO UPDATE SET
+        customer_id = COALESCE(EXCLUDED.customer_id, visitor_sessions.customer_id),
+        customer_name = COALESCE(NULLIF(EXCLUDED.customer_name, ''), visitor_sessions.customer_name),
+        customer_phone = COALESCE(NULLIF(EXCLUDED.customer_phone, ''), visitor_sessions.customer_phone),
+        customer_email = COALESCE(NULLIF(EXCLUDED.customer_email, ''), visitor_sessions.customer_email),
+        source_channel = CASE
+          WHEN EXCLUDED.source_channel <> 'direct' THEN EXCLUDED.source_channel
+          ELSE visitor_sessions.source_channel
+        END,
+        source_label = CASE
+          WHEN EXCLUDED.source_channel <> 'direct' THEN EXCLUDED.source_label
+          ELSE visitor_sessions.source_label
+        END,
+        utm_source = COALESCE(NULLIF(EXCLUDED.utm_source, ''), visitor_sessions.utm_source),
+        utm_medium = COALESCE(NULLIF(EXCLUDED.utm_medium, ''), visitor_sessions.utm_medium),
+        utm_campaign = COALESCE(NULLIF(EXCLUDED.utm_campaign, ''), visitor_sessions.utm_campaign),
+        referrer = COALESCE(NULLIF(EXCLUDED.referrer, ''), visitor_sessions.referrer),
+        device_type = COALESCE(NULLIF(EXCLUDED.device_type, ''), visitor_sessions.device_type),
+        last_path = COALESCE(NULLIF(EXCLUDED.last_path, ''), visitor_sessions.last_path),
+        last_seen_at = NOW();
+    `;
+  } catch {}
+}
+
+function summarizeInsightMetrics(recentViews: any[], orderRows: any[]) {
+  const orders = (orderRows as any[]).map(mapRowToOrder);
+  const executedOrders = orders.filter(o => o.order_status !== 'cancelled');
+  const deliveredOrders = orders.filter(o => o.order_status === 'delivered');
+  const cancelledOrders = orders.filter(o => o.order_status === 'cancelled');
+  const totalSpent = executedOrders.reduce((s, o) => s + Number(o.total || 0), 0);
+
+  const categoryMap = new Map<string, number>();
+  for (const v of recentViews as any[]) {
+    if (v.category) categoryMap.set(v.category, (categoryMap.get(v.category) || 0) + Number(v.view_count || 1));
+  }
+  for (const o of executedOrders) {
+    for (const item of o.items || []) {
+      const cat = item?.product?.category;
+      if (cat) categoryMap.set(cat, (categoryMap.get(cat) || 0) + 2);
+    }
+  }
+  const topCategories = Array.from(categoryMap.entries())
+    .map(([category, score]) => ({ category, score }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+
+  const mappedViews = (recentViews as any[]).map(v => ({
+    product_id: v.product_id,
+    name_ar: v.name_ar,
+    handle: v.handle,
+    category: v.category,
+    price: Number(v.price || 0),
+    image: Array.isArray(v.images) && v.images[0] ? v.images[0] : '/qamar-images/placeholder.svg',
+    viewed_at: v.viewed_at,
+    view_count: Number(v.view_count || 1)
+  }));
+
+  return {
+    recentViews: mappedViews,
+    orders,
+    topCategories,
+    stats: {
+      total_orders: orders.length,
+      executed_orders: executedOrders.length,
+      delivered_orders: deliveredOrders.length,
+      cancelled_orders: cancelledOrders.length,
+      total_spent: totalSpent,
+      views_count: mappedViews.length
+    }
+  };
 }
 
 function mapRowToProduct(row: any): Product {
@@ -383,25 +525,46 @@ export const neonDb = {
     }
   },
 
-  async trackActivity(activity: { sessionId: string; customerId?: string; actionType: string; targetId?: string; metadata?: Record<string, any> }) {
+  async trackActivity(activity: { sessionId: string; customerId?: string; customerName?: string; customerPhone?: string; customerEmail?: string; actionType: string; targetId?: string; metadata?: Record<string, any>; attribution?: any }) {
     try {
       await ensureUserCrmColumns();
+      const meta = {
+        ...(activity.metadata || {}),
+        ...(activity.attribution?.source_channel ? { source_channel: activity.attribution.source_channel, source_label: activity.attribution.source_label } : {})
+      };
       await sql`
         INSERT INTO customer_activity (session_id, customer_id, action_type, target_id, metadata)
-        VALUES (${activity.sessionId}, ${activity.customerId || null}, ${activity.actionType}, ${activity.targetId || null}, ${JSON.stringify(activity.metadata || {})}::jsonb);
+        VALUES (${activity.sessionId}, ${activity.customerId || null}, ${activity.actionType}, ${activity.targetId || null}, ${JSON.stringify(meta)}::jsonb);
       `;
+      await upsertVisitorSession({
+        sessionId: activity.sessionId,
+        customerId: activity.customerId,
+        customerName: activity.customerName,
+        customerPhone: activity.customerPhone,
+        customerEmail: activity.customerEmail,
+        attribution: activity.attribution
+      });
       if (activity.customerId) {
         await sql`UPDATE users SET last_seen_at = NOW() WHERE id = ${activity.customerId};`;
         if (activity.sessionId) {
           await sql`UPDATE customer_activity SET customer_id = ${activity.customerId} WHERE session_id = ${activity.sessionId} AND customer_id IS NULL;`;
+          await sql`UPDATE visitor_sessions SET customer_id = ${activity.customerId} WHERE session_id = ${activity.sessionId} AND customer_id IS NULL;`;
         }
       }
     } catch {}
   },
 
-  async syncActiveCart(cart: { sessionId: string; customerId?: string; customerEmail?: string; customerName?: string; customerPhone?: string; items: any[]; subtotal: number }) {
+  async syncActiveCart(cart: { sessionId: string; customerId?: string; customerEmail?: string; customerName?: string; customerPhone?: string; items: any[]; subtotal: number; attribution?: any }) {
     try {
       await ensureUserCrmColumns();
+      await upsertVisitorSession({
+        sessionId: cart.sessionId,
+        customerId: cart.customerId,
+        customerName: cart.customerName,
+        customerPhone: cart.customerPhone,
+        customerEmail: cart.customerEmail,
+        attribution: cart.attribution
+      });
       if (!cart.items || cart.items.length === 0) {
         await sql`DELETE FROM active_carts WHERE session_id = ${cart.sessionId};`;
         return;
@@ -412,8 +575,8 @@ export const neonDb = {
         ON CONFLICT (session_id) DO UPDATE SET
           customer_id = COALESCE(EXCLUDED.customer_id, active_carts.customer_id),
           customer_email = COALESCE(EXCLUDED.customer_email, active_carts.customer_email),
-          customer_name = COALESCE(EXCLUDED.customer_name, active_carts.customer_name),
-          customer_phone = COALESCE(EXCLUDED.customer_phone, active_carts.customer_phone),
+          customer_name = COALESCE(NULLIF(EXCLUDED.customer_name, ''), active_carts.customer_name),
+          customer_phone = COALESCE(NULLIF(EXCLUDED.customer_phone, ''), active_carts.customer_phone),
           items = EXCLUDED.items,
           subtotal = EXCLUDED.subtotal,
           is_abandoned = false,
@@ -423,6 +586,30 @@ export const neonDb = {
         await sql`UPDATE users SET last_seen_at = NOW() WHERE id = ${cart.customerId};`;
       }
     } catch {}
+  },
+
+  async getRecentlyViewedProductIds(sessionId: string, customerId?: string): Promise<string[]> {
+    try {
+      await ensureUserCrmColumns();
+      const cleanSid = String(sessionId || '').trim();
+      if (!cleanSid && !customerId) return [];
+      const rows = await sql`
+        SELECT ca.target_id, MAX(ca.created_at) AS latest_at
+        FROM customer_activity ca
+        WHERE ca.action_type = 'view_product'
+          AND ca.target_id IS NOT NULL
+          AND (
+            (${customerId || null}::text IS NOT NULL AND ca.customer_id = ${customerId || null})
+            OR (${cleanSid} <> '' AND ca.session_id = ${cleanSid})
+          )
+        GROUP BY ca.target_id
+        ORDER BY MAX(ca.created_at) DESC
+        LIMIT 15;
+      `;
+      return (rows as any[]).map(r => String(r.target_id)).filter(Boolean);
+    } catch {
+      return [];
+    }
   },
 
   async getActiveCarts() {
@@ -503,7 +690,11 @@ export const neonDb = {
             (SELECT MAX(ca.created_at) FROM customer_activity ca WHERE ca.customer_id = u.id),
             (SELECT MAX(s.created_at) FROM app_sessions s WHERE s.user_id = u.id),
             (SELECT MAX(o.created_at) FROM orders o WHERE (o.customer_email IS NOT NULL AND lower(o.customer_email) = lower(u.email)) OR o.customer_id = u.id)
-          ) AS last_activity_at
+          ) AS last_activity_at,
+          (SELECT vs.source_channel FROM visitor_sessions vs WHERE vs.customer_id = u.id ORDER BY vs.last_seen_at DESC LIMIT 1) AS source_channel,
+          (SELECT vs.source_label FROM visitor_sessions vs WHERE vs.customer_id = u.id ORDER BY vs.last_seen_at DESC LIMIT 1) AS source_label,
+          (SELECT vs.utm_campaign FROM visitor_sessions vs WHERE vs.customer_id = u.id ORDER BY vs.last_seen_at DESC LIMIT 1) AS utm_campaign,
+          (SELECT vs.device_type FROM visitor_sessions vs WHERE vs.customer_id = u.id ORDER BY vs.last_seen_at DESC LIMIT 1) AS device_type
         FROM users u
         ORDER BY u.created_at DESC;
       `;
@@ -617,45 +808,165 @@ export const neonDb = {
         recentActions[0]?.created_at,
         recentViews[0]?.viewed_at,
         carts[0]?.last_updated_at,
-        orders[0]?.created_at
+        orderRows[0]?.created_at
       ]
         .filter(Boolean)
         .map(t => new Date(t).getTime())
         .filter(n => Number.isFinite(n));
       const lastActivityAt = timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : u.created_at;
+      const vsRows = await sql`
+        SELECT source_channel, source_label, utm_source, utm_medium, utm_campaign, referrer, device_type, landing_path, last_path
+        FROM visitor_sessions WHERE customer_id = ${u.id} ORDER BY last_seen_at DESC LIMIT 1;
+      `.catch(() => []);
 
+      const metrics = summarizeInsightMetrics(recentViews, orderRows);
       return {
         success: true,
         user: {
           ...u,
-          last_activity_at: lastActivityAt
+          last_activity_at: lastActivityAt,
+          ...(vsRows[0] || {})
         },
-        recentViews: (recentViews as any[]).map(v => ({
-          product_id: v.product_id,
-          name_ar: v.name_ar,
-          handle: v.handle,
-          category: v.category,
-          price: Number(v.price || 0),
-          image: Array.isArray(v.images) && v.images[0] ? v.images[0] : '/qamar-images/placeholder.svg',
-          viewed_at: v.viewed_at,
-          view_count: Number(v.view_count || 1)
-        })),
+        ...metrics,
         recentActions,
         activeCarts: carts,
-        orders,
-        reviews,
-        topCategories,
-        stats: {
-          total_orders: orders.length,
-          executed_orders: executedOrders.length,
-          delivered_orders: deliveredOrders.length,
-          cancelled_orders: cancelledOrders.length,
-          total_spent: totalSpent,
-          views_count: recentViews.length
-        }
+        reviews
       };
     } catch (err: any) {
       return { success: false, error: err?.message || 'تعذر تحميل تحليلات الحساب.' };
+    }
+  },
+
+  async getGuestVisitors(limit = 120) {
+    try {
+      await ensureUserCrmColumns();
+      const safeLimit = Math.max(1, Math.min(250, Number(limit) || 120));
+      return await sql`
+        SELECT
+          vs.session_id,
+          COALESCE(NULLIF(vs.customer_name, ''), (SELECT ac.customer_name FROM active_carts ac WHERE ac.session_id = vs.session_id LIMIT 1), '') AS customer_name,
+          COALESCE(NULLIF(vs.customer_phone, ''), (SELECT ac.customer_phone FROM active_carts ac WHERE ac.session_id = vs.session_id LIMIT 1), '') AS customer_phone,
+          vs.source_channel,
+          vs.source_label,
+          vs.utm_source,
+          vs.utm_medium,
+          vs.utm_campaign,
+          vs.referrer,
+          vs.device_type,
+          vs.landing_path,
+          vs.last_path,
+          vs.first_seen_at,
+          vs.last_seen_at,
+          COALESCE((SELECT COUNT(DISTINCT ca.target_id)::int FROM customer_activity ca WHERE ca.session_id = vs.session_id AND ca.action_type = 'view_product'), 0) AS views_count,
+          COALESCE((SELECT SUM(CASE WHEN jsonb_typeof(ac.items) = 'array' THEN jsonb_array_length(ac.items) ELSE 0 END)::int FROM active_carts ac WHERE ac.session_id = vs.session_id), 0) AS cart_items_count,
+          COALESCE((SELECT SUM(ac.subtotal)::numeric FROM active_carts ac WHERE ac.session_id = vs.session_id), 0) AS cart_subtotal,
+          COALESCE((
+            SELECT COUNT(*)::int FROM orders o
+            WHERE (NULLIF(vs.customer_phone, '') IS NOT NULL AND o.customer_phone = vs.customer_phone)
+               OR o.order_number IN (SELECT ca.target_id FROM customer_activity ca WHERE ca.session_id = vs.session_id AND ca.action_type = 'order_placed')
+          ), 0) AS orders_count,
+          COALESCE((
+            SELECT COUNT(*)::int FROM orders o
+            WHERE o.status <> 'cancelled'
+              AND ((NULLIF(vs.customer_phone, '') IS NOT NULL AND o.customer_phone = vs.customer_phone)
+                OR o.order_number IN (SELECT ca.target_id FROM customer_activity ca WHERE ca.session_id = vs.session_id AND ca.action_type = 'order_placed'))
+          ), 0) AS completed_orders_count,
+          COALESCE((
+            SELECT SUM(o.total)::numeric FROM orders o
+            WHERE o.status <> 'cancelled'
+              AND ((NULLIF(vs.customer_phone, '') IS NOT NULL AND o.customer_phone = vs.customer_phone)
+                OR o.order_number IN (SELECT ca.target_id FROM customer_activity ca WHERE ca.session_id = vs.session_id AND ca.action_type = 'order_placed'))
+          ), 0) AS total_spent
+        FROM visitor_sessions vs
+        WHERE vs.customer_id IS NULL
+        ORDER BY vs.last_seen_at DESC
+        LIMIT ${safeLimit};
+      `;
+    } catch {
+      return [];
+    }
+  },
+
+  async getGuestInsights(sessionId: string) {
+    try {
+      await ensureUserCrmColumns();
+      const sid = String(sessionId || '').trim();
+      const rows = await sql`SELECT * FROM visitor_sessions WHERE session_id = ${sid} LIMIT 1;`;
+      const vs = rows[0] || {
+        session_id: sid,
+        source_channel: 'direct',
+        source_label: 'دخول مباشر / تطبيق المتجر',
+        first_seen_at: new Date().toISOString(),
+        last_seen_at: new Date().toISOString()
+      };
+
+      const carts = await sql`SELECT * FROM active_carts WHERE session_id = ${sid} ORDER BY last_updated_at DESC LIMIT 3;`.catch(() => []);
+      const cleanPhone = String(vs.customer_phone || carts[0]?.customer_phone || '').trim();
+      const cleanName = String(vs.customer_name || carts[0]?.customer_name || '').trim();
+
+      const [recentViews, recentActions, orderRows] = await Promise.all([
+        sql`
+          SELECT
+            ca.target_id AS product_id,
+            MAX(ca.created_at) AS viewed_at,
+            COUNT(*)::int AS view_count,
+            COALESCE(p.name_ar, MAX(ca.metadata->>'name_ar'), ca.target_id) AS name_ar,
+            COALESCE(p.handle, MAX(ca.metadata->>'handle'), ca.target_id) AS handle,
+            COALESCE(p.category, MAX(ca.metadata->>'category'), '') AS category,
+            COALESCE(p.price, 0)::numeric AS price,
+            COALESCE(p.images, '[]'::jsonb) AS images
+          FROM customer_activity ca
+          LEFT JOIN products p ON p.id = ca.target_id
+          WHERE ca.action_type = 'view_product'
+            AND ca.target_id IS NOT NULL
+            AND ca.session_id = ${sid}
+          GROUP BY ca.target_id, p.name_ar, p.handle, p.category, p.price, p.images
+          ORDER BY MAX(ca.created_at) DESC
+          LIMIT 15;
+        `.catch(() => []),
+        sql`
+          SELECT action_type, target_id, metadata, created_at
+          FROM customer_activity
+          WHERE session_id = ${sid}
+          ORDER BY created_at DESC
+          LIMIT 25;
+        `.catch(() => []),
+        sql`
+          SELECT * FROM orders
+          WHERE (${cleanPhone} <> '' AND customer_phone = ${cleanPhone})
+             OR order_number IN (SELECT target_id FROM customer_activity WHERE session_id = ${sid} AND action_type = 'order_placed')
+          ORDER BY created_at DESC
+          LIMIT 50;
+        `.catch(() => [])
+      ]);
+
+      const metrics = summarizeInsightMetrics(recentViews, orderRows);
+      return {
+        success: true,
+        guest: {
+          ...vs,
+          customer_name: cleanName,
+          customer_phone: cleanPhone,
+          last_activity_at: vs.last_seen_at || recentActions[0]?.created_at || carts[0]?.last_updated_at || vs.first_seen_at
+        },
+        ...metrics,
+        recentActions,
+        activeCarts: carts
+      };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'تعذر تحميل بيانات الزائر.' };
+    }
+  },
+
+  async deleteGuestVisitor(sessionId: string) {
+    try {
+      await ensureUserCrmColumns();
+      await sql`DELETE FROM active_carts WHERE session_id = ${sessionId};`;
+      await sql`DELETE FROM customer_activity WHERE session_id = ${sessionId} AND customer_id IS NULL;`;
+      await sql`DELETE FROM visitor_sessions WHERE session_id = ${sessionId} AND customer_id IS NULL;`;
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'تعذر حذف سجل الزائر.' };
     }
   },
 

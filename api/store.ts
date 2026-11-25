@@ -21,6 +21,8 @@ const policies: Record<string, string[]> = {
   deleteProduct: ['products'],
   getAllUsers: ['users'],
   getUserInsights: ['users'],
+  getGuestVisitors: ['users', 'crm'],
+  getGuestInsights: ['users', 'crm'],
   getActiveCarts: ['crm'],
   updateOrderState: ['orders'],
   getOilReserves: ['oils', 'inventory', 'products'],
@@ -252,7 +254,11 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
       total_spent: Number(u.total_spent || 0),
       cart_items_count: Number(u.cart_items_count || 0),
       cart_subtotal: Number(u.cart_subtotal || 0),
-      views_count: Number(u.views_count || 0)
+      views_count: Number(u.views_count || 0),
+      source_channel: u.source_channel || null,
+      source_label: u.source_label || null,
+      utm_campaign: u.utm_campaign || null,
+      device_type: u.device_type || null
     }));
   }
 
@@ -260,6 +266,27 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
     const userId = String(args[0] || '').trim();
     if (!userId) throw fail(400, 'معرف الحساب مطلوب.');
     return store.getUserInsights(userId);
+  }
+
+  if (method === 'getGuestVisitors') {
+    return store.getGuestVisitors(args[0]);
+  }
+
+  if (method === 'getGuestInsights') {
+    const sid = String(args[0] || '').trim();
+    if (!sid) throw fail(400, 'معرف الجلسة مطلوب.');
+    return store.getGuestInsights(sid);
+  }
+
+  if (method === 'deleteGuestVisitor') {
+    if (!isFullAdmin(user)) throw forbidden();
+    const sid = String(args[0] || '').trim();
+    if (!sid) throw fail(400, 'معرف الجلسة مطلوب.');
+    return store.deleteGuestVisitor(sid);
+  }
+
+  if (method === 'getRecentlyViewedProductIds') {
+    return store.getRecentlyViewedProductIds(String(args[0] || ''), user?.id);
   }
 
   if (method === 'adminCreateUser') {
@@ -469,6 +496,20 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
       payment_status: 'unpaid',
       order_status: 'pending'
     });
+    if (saved && order.session_id) {
+      store
+        .trackActivity({
+          sessionId: String(order.session_id),
+          customerId: user?.id,
+          customerName: order.customer_name,
+          customerPhone: phone,
+          customerEmail: user?.email || order.customer_email,
+          actionType: 'order_placed',
+          targetId: safeOrderNumber,
+          metadata: { total: order.total, payment_method: order.payment_method }
+        })
+        .catch(() => {});
+    }
     if (saved && (!deps || deps.dispatchWhatsApp)) {
       try {
         const settings = await store.getStoreSettings().catch(() => ({}));
