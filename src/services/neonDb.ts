@@ -59,10 +59,11 @@ export const neonDb = {
     return callStore('updateUserAccess', [userId, access]);
   },
   async getAllUsers() { return callStore('getAllUsers'); },
-  async deleteUser(userId: string) { return callStore('deleteUser', [userId]); },
-  async updateUserProfile(userId: string, data: any) { return callStore('updateUserProfile', [userId, data]); },
+  async deleteUser(userId: string) { return callAction('deleteUser', [userId]); },
+  async updateUserProfile(userId: string, data: any) { return callAction('updateUserProfile', [userId, data]); },
+  async updateUserEmail(userId: string, newEmail: string) { return callAction('updateUserEmail', [userId, newEmail]); },
   async changePassword(userId: string, oldPass: string, newPass: string) {
-    return callStore('changePassword', [userId, oldPass, newPass]);
+    return callAction('changePassword', [userId, oldPass, newPass]);
   },
 
   async sendVerificationOtp(email: string, name?: string) {

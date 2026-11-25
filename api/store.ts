@@ -286,17 +286,36 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
     if (!user || user.id !== args[0]) throw forbidden();
     const data = { ...(args[1] || {}) };
     if (data.email && data.email.trim().toLowerCase() !== user.email.toLowerCase()) throw fail(400, 'لا يمكن تغيير البريد الإلكتروني مباشرة.');
+    if (data.phone !== undefined) data.phone = normalizePhone(String(data.phone || ''));
+    if (data.name !== undefined && !String(data.name || '').trim()) throw fail(400, 'الاسم مطلوب.');
     delete data.email; delete data.role; delete data.admin_permissions;
     const result = await store.updateUserProfile(user.id, data);
     return { ...result, user: result.user ? { ...publicUser(result.user), admin_permissions: user.admin_permissions } : undefined };
   }
 
+  if (method === 'updateUserEmail') {
+    if (!user || user.id !== args[0]) throw forbidden();
+    if (user.email.toLowerCase() === OWNER_EMAIL) throw fail(400, 'لا يمكن تغيير بريد المالك المحمي من هنا.');
+    const nextEmail = String(args[1] || '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) throw fail(400, 'أدخل بريداً إلكترونياً صالحاً.');
+    if (nextEmail === user.email.toLowerCase()) return { success: true, user };
+    const conflict = await sql`SELECT id FROM users WHERE lower(email)=${nextEmail} AND id<>${user.id} LIMIT 1`;
+    if (conflict.length) throw fail(409, 'هذا البريد الإلكتروني مستخدم لحساب آخر بالفعل.');
+    const rows = await sql`
+      UPDATE users SET email=${nextEmail}, email_verified=false, updated_at=NOW()
+      WHERE id=${user.id} AND lower(email)<>${OWNER_EMAIL}
+      RETURNING id, name, email, phone, avatar, role, provider, email_verified, addresses, created_at, admin_permissions;
+    `;
+    return rows[0] ? { success: true, user: publicUser(rows[0]) } : { success: false, error: 'تعذر تحديث البريد.' };
+  }
+
   if (method === 'changePassword') {
     if (!user || user.id !== args[0]) throw forbidden();
     const [, oldPass, newPass] = args;
-    if (typeof newPass !== 'string' || newPass.length < 8 || newPass.length > 512) throw fail(400, 'كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل.');
+    if (typeof newPass !== 'string' || newPass.length < 6 || newPass.length > 512) throw fail(400, 'كلمة المرور الجديدة يجب أن تكون 6 أحرف على الأقل.');
     const rows = await sql`SELECT password_hash FROM users WHERE id=${user.id}`;
-    if (!passwordMatches(oldPass, rows[0]?.password_hash)) throw fail(400, 'كلمة المرور الحالية غير صحيحة.');
+    const existingHash = rows[0]?.password_hash || '';
+    if (existingHash && !passwordMatches(oldPass, existingHash)) throw fail(400, 'كلمة المرور الحالية غير صحيحة.');
     await sql`UPDATE users SET password_hash=${passwordHash(newPass)}, updated_at=NOW() WHERE id=${user.id}`;
     return { success: true };
   }
@@ -304,7 +323,11 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
   if (method === 'deleteUser') {
     if (!user || (!isFullAdmin(user) && user.id !== args[0])) throw forbidden();
     const rows = await sql`DELETE FROM users WHERE id=${args[0]} AND lower(email)<>${OWNER_EMAIL} RETURNING id`;
-    return rows.length ? { success: true } : { success: false, error: 'لا يمكن حذف الحساب المحمي.' };
+    if (!rows.length) return { success: false, error: 'لا يمكن حذف حساب المالك المحمي أو الحساب غير موجود.' };
+    if (user.id === args[0]) {
+      await endSession(req, res, sql).catch(() => {});
+    }
+    return { success: true };
   }
 
   if (method === 'cancelOrder') {

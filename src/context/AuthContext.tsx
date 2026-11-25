@@ -49,7 +49,9 @@ interface AuthContextType {
   verifyOtpAndRegister: (data: { email: string; code: string; name: string; phone: string; password?: string }) => Promise<any>;
   logout: () => void;
   updateProfile: (data: Partial<User>) => Promise<{ success: boolean; error?: string }>;
+  updateEmail: (newEmail: string) => Promise<{ success: boolean; error?: string }>;
   changePassword: (oldPass: string, newPass: string) => Promise<{ success: boolean; error?: string }>;
+  deleteAccount: () => Promise<{ success: boolean; error?: string }>;
   addAddress: (address: Omit<UserAddress, 'id'>) => Promise<{ success: boolean; error?: string }>;
   deleteAddress: (id: string) => Promise<{ success: boolean; error?: string }>;
   redirectAfterLogin: string | null;
@@ -166,9 +168,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return res;
   };
 
+  const updateEmail = async (newEmail: string) => {
+    if (!user) return { success: false, error: 'يجب تسجيل الدخول.' };
+    const res = await neonDb.updateUserEmail(user.id, newEmail);
+    if (res.success && res.user) setUser(prev => prev ? { ...prev, ...res.user } : res.user);
+    return res;
+  };
+
   const changePassword = async (oldPass: string, newPass: string) => {
     if (!user) return { success: false, error: 'يجب تسجيل الدخول.' };
     return neonDb.changePassword(user.id, oldPass, newPass);
+  };
+
+  const deleteAccount = async () => {
+    if (!user) return { success: false, error: 'يجب تسجيل الدخول.' };
+    const res = await neonDb.deleteUser(user.id);
+    if (res?.success) {
+      activeUserId.current = undefined;
+      setUser(null);
+      setPendingSecondFactor(false);
+      removeStorage('qamar_store_user');
+    }
+    return res;
   };
 
   const addAddress = async (addr: Omit<UserAddress, 'id'>) => {
@@ -216,7 +237,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       },
       logout,
       updateProfile,
+      updateEmail,
       changePassword,
+      deleteAccount,
       addAddress,
       deleteAddress,
       redirectAfterLogin

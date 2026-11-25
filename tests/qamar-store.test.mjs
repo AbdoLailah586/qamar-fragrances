@@ -567,3 +567,71 @@ describe('Installable PWA & Mobile/Desktop Responsive Contracts', () => {
     assert.match(socialSrc, /<svg viewBox="0 0 24 24"/);
   });
 });
+
+describe('Customer Account Management & Deletion (Profile / api/store)', () => {
+  test('POST deleteUser permanently deletes self-account and clears session cookie', async () => {
+    let deletedId = null;
+    const mockSql = async (strings, ...vals) => {
+      const q = strings.join('?');
+      if (q.includes('DELETE FROM users')) {
+        deletedId = vals[0];
+        return [{ id: vals[0] }];
+      }
+      return [];
+    };
+
+    const customer = { id: 'usr-cust-1', email: 'abdolailah586@gmail.com', role: 'customer', admin_permissions: [] };
+    const reqOther = createMockReq({
+      method: 'POST',
+      headers: { origin: 'https://qamar-fragrances.com' },
+      body: { method: 'deleteUser', args: ['usr-other-2'] }
+    });
+    const resOther = createMockRes();
+    await storeApi.default(reqOther, resOther, { sql: mockSql, store: {}, user: customer });
+    assert.equal(resOther.statusCode, 403);
+    assert.equal(deletedId, null);
+
+    const reqSelf = createMockReq({
+      method: 'POST',
+      headers: { origin: 'https://qamar-fragrances.com', cookie: 'qamar_session=' + 'a'.repeat(64) },
+      body: { method: 'deleteUser', args: ['usr-cust-1'] }
+    });
+    const resSelf = createMockRes();
+    await storeApi.default(reqSelf, resSelf, { sql: mockSql, store: {}, user: customer });
+    assert.equal(resSelf.statusCode, 200);
+    assert.equal(resSelf.body.result.success, true);
+    assert.equal(deletedId, 'usr-cust-1');
+    assert.match(resSelf.headers['set-cookie'] || '', /qamar_session=;.*Max-Age=0/);
+  });
+
+  test('POST changePassword allows Google users without password_hash to set an initial password', async () => {
+    let savedHash = null;
+    const mockSql = async (strings, ...vals) => {
+      const q = strings.join('?');
+      if (q.includes('SELECT password_hash FROM users')) return [{ password_hash: '' }];
+      if (q.includes('UPDATE users SET password_hash')) { savedHash = vals[0]; return []; }
+      return [];
+    };
+
+    const googleUser = { id: 'usr-google-1', email: 'g@gmail.com', role: 'customer', provider: 'google', admin_permissions: [] };
+    const req = createMockReq({
+      method: 'POST',
+      headers: { origin: 'https://qamar-fragrances.com' },
+      body: { method: 'changePassword', args: ['usr-google-1', '', 'NewStrongPass123'] }
+    });
+    const res = createMockRes();
+    await storeApi.default(req, res, { sql: mockSql, store: {}, user: googleUser });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.result.success, true);
+    assert.match(savedHash, /^scrypt\$/);
+  });
+
+  test('Profile page renders sidebar tabs, edit buttons, and deleteAccount action', () => {
+    const profileSrc = readFileSync(resolve(ROOT, 'src/pages/Profile.tsx'), 'utf8');
+    assert.match(profileSrc, /حسابي/);
+    assert.match(profileSrc, /طلباتي/);
+    assert.match(profileSrc, /عناويني/);
+    assert.match(profileSrc, /حذف الحساب/);
+    assert.match(profileSrc, /deleteAccount/);
+  });
+});

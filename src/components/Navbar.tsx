@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, ShoppingCart, User, ShieldCheck, X } from 'lucide-react';
+import { Search, ShoppingCart, User, ShieldCheck, X, ChevronDown, Package, MapPin, LogOut } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
-import { formatEGP, toArabicDigits } from '../utils/arabicNumbers';
+import { formatEGP } from '../utils/arabicNumbers';
 import { InstallAppButton } from './PwaControls';
 import { SocialIconLinks } from './SocialIcons';
 
@@ -19,16 +19,19 @@ export const Navbar: React.FC = () => {
     navigate,
     openProduct
   } = useStore();
-  const { user, canAccessAdmin, openAuthModal } = useAuth();
+  const { user, canAccessAdmin, openAuthModal, logout } = useAuth();
   const [localSearch, setLocalSearch] = useState(searchQuery);
   const [showSuggest, setShowSuggest] = useState(false);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const accRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setLocalSearch(searchQuery); }, [searchQuery]);
 
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setShowSuggest(false);
+      if (accRef.current && !accRef.current.contains(e.target as Node)) setShowAccountMenu(false);
     };
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
@@ -149,14 +152,42 @@ export const Navbar: React.FC = () => {
           )}
 
           {user ? (
-            <button
-              type="button"
-              onClick={() => navigate('profile')}
-              className="hidden md:flex items-center gap-1.5 text-sm font-medium text-[#252a31] hover:text-[#fe9931] transition"
-            >
-              <User className="w-4 h-4" />
-              <span className="max-w-[110px] truncate">{user.name || 'حسابي'}</span>
-            </button>
+            <div ref={accRef} className="hidden md:block relative">
+              <button
+                type="button"
+                onClick={() => setShowAccountMenu(v => !v)}
+                className="flex items-center gap-1.5 text-sm font-medium text-[#252a31] hover:text-[#fe9931] transition"
+              >
+                <User className="w-4 h-4" />
+                <span>حسابي</span>
+                <ChevronDown className="w-3.5 h-3.5 text-[#fe9931]" />
+              </button>
+
+              {showAccountMenu && (
+                <div className="absolute left-0 top-full mt-2 w-52 bg-white rounded-2xl shadow-xl border border-gray-100 py-2 z-50 text-xs font-bold">
+                  <div className="px-4 py-2 border-b border-gray-100">
+                    <p className="text-[#252a31] truncate">{user.name}</p>
+                    <p className="text-[11px] font-normal text-gray-400 truncate" dir="ltr">{user.email}</p>
+                  </div>
+                  <button type="button" onClick={() => { setShowAccountMenu(false); navigate('profile'); window.dispatchEvent(new CustomEvent('qamar-profile-tab', { detail: 'account' })); }}
+                    className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-amber-50/70 text-[#252a31]">
+                    <User className="w-3.5 h-3.5 text-[#fe9931]" /> حسابي
+                  </button>
+                  <button type="button" onClick={() => { setShowAccountMenu(false); navigate('profile'); window.dispatchEvent(new CustomEvent('qamar-profile-tab', { detail: 'orders' })); }}
+                    className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-amber-50/70 text-[#252a31]">
+                    <Package className="w-3.5 h-3.5 text-[#fe9931]" /> طلباتي
+                  </button>
+                  <button type="button" onClick={() => { setShowAccountMenu(false); navigate('profile'); window.dispatchEvent(new CustomEvent('qamar-profile-tab', { detail: 'addresses' })); }}
+                    className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-amber-50/70 text-[#252a31]">
+                    <MapPin className="w-3.5 h-3.5 text-[#fe9931]" /> عناويني
+                  </button>
+                  <button type="button" onClick={() => { setShowAccountMenu(false); logout(); navigate('home'); }}
+                    className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-red-50 text-red-600 border-t border-gray-100 mt-1">
+                    <LogOut className="w-3.5 h-3.5" /> تسجيل الخروج
+                  </button>
+                </div>
+              )}
+            </div>
           ) : (
             <button
               type="button"
