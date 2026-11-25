@@ -35,6 +35,8 @@ registerHooks({
 });
 
 const access = await import(pathToFileURL(resolve(ROOT, 'lib/access.js')).href);
+const googleCred = await import(pathToFileURL(resolve(ROOT, 'lib/googleCredential.js')).href);
+const googleAuthApi = await import(pathToFileURL(resolve(ROOT, 'api/google-auth.js')).href);
 const arabic = await import(pathToFileURL(resolve(ROOT, 'src/utils/arabicNumbers.ts')).href);
 const delivery = await import(pathToFileURL(resolve(ROOT, 'src/utils/deliveryAddress.ts')).href);
 const storeApi = await import(pathToFileURL(resolve(ROOT, 'api/store.ts')).href);
@@ -323,5 +325,58 @@ describe('Frontend Client & Guard Wiring Contracts', () => {
     const guardIdx = adminSrc.indexOf('if (!canAccessAdmin)');
     assert.ok(hookIdx !== -1 && guardIdx !== -1, 'Expected useState and !canAccessAdmin guard');
     assert.ok(hookIdx < guardIdx, 'React hooks must execute unconditionally before !canAccessAdmin early return');
+  });
+
+  test('AuthModal wires Google Identity Services and Email OTP verification', () => {
+    const authModalSrc = readFileSync(resolve(ROOT, 'src/components/AuthModal.tsx'), 'utf8');
+    assert.match(authModalSrc, /loadGoogleIdentity/);
+    assert.match(authModalSrc, /loginWithGoogle/);
+    assert.match(authModalSrc, /renderButton/);
+  });
+});
+
+describe('Google Sign-In Verification & Session Policy', () => {
+  test('verifyGoogleCredential enforces verified Google emails and non-empty client ID fallback', async () => {
+    assert.match(googleCred.DEFAULT_GOOGLE_CLIENT_ID, /apps\.googleusercontent\.com$/);
+    await assert.rejects(() => googleCred.verifyGoogleCredential('short'), /Invalid Google credential/);
+    await assert.rejects(
+      () => googleCred.verifyGoogleCredential('x'.repeat(30), 'aud', {
+        async verifyIdToken() { return { getPayload: () => ({ sub: '123', email: 'u@gmail.com', email_verified: false }) }; }
+      }),
+      /Unverified Google account/
+    );
+    const verified = await googleCred.verifyGoogleCredential('x'.repeat(30), 'aud', {
+      async verifyIdToken() {
+        return { getPayload: () => ({ sub: 'g-1', email: ' AbdoLailah586@Gmail.com ', name: 'Abdo', picture: 'https://pic', email_verified: true }) };
+      }
+    });
+    assert.equal(verified.email, 'abdolailah586@gmail.com');
+    assert.equal(verified.googleId, 'g-1');
+  });
+
+  test('api/google-auth sets no-store, rejects cross-origin, and promotes OWNER_EMAIL on first Google login', async () => {
+    let seenRole = null;
+    const mockSql = async (_strings, ...vals) => {
+      seenRole = vals[4];
+      return [{ id: vals[0], name: vals[1], email: vals[2], avatar: vals[3], phone: '', role: vals[4], provider: 'google', email_verified: true, addresses: [], created_at: '2026-01-01', admin_permissions: [], totp_enabled: false }];
+    };
+
+    const crossReq = createMockReq({ method: 'POST', headers: { origin: 'https://evil.example' }, body: { credential: 'x'.repeat(30) } });
+    const crossRes = createMockRes();
+    await googleAuthApi.default(crossReq, crossRes);
+    assert.equal(crossRes.statusCode, 403);
+    assert.equal(crossRes.headers['cache-control'], 'no-store');
+
+    const okReq = createMockReq({ method: 'POST', headers: { origin: 'https://qamar-fragrances.com' }, body: { credential: 'x'.repeat(30) } });
+    const okRes = createMockRes();
+    await googleAuthApi.default(okReq, okRes, {
+      verifyGoogleCredential: async () => ({ googleId: '99', email: 'qamaraboalnaga@gmail.com', name: 'Owner', avatar: '' }),
+      sql: mockSql,
+      issueSession: async () => {}
+    });
+    assert.equal(okRes.statusCode, 200);
+    assert.equal(seenRole, 'admin');
+    assert.equal(okRes.body.success, true);
+    assert.equal(okRes.body.user.role, 'admin');
   });
 });

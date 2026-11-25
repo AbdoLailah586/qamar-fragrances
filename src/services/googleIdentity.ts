@@ -1,0 +1,36 @@
+let pendingLoad: Promise<any> | null = null;
+
+// Dynamically load Google Identity Services once and resolve when window.google.accounts.id is ready.
+export function loadGoogleIdentity(win: Window = window, doc: Document = document, timeoutMs = 20000): Promise<any> {
+  if ((win as any).google?.accounts?.id) return Promise.resolve((win as any).google.accounts.id);
+  if (pendingLoad) return pendingLoad;
+
+  const load = new Promise((resolve, reject) => {
+    const script = doc.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    let settled = false;
+    let timeout: ReturnType<typeof setTimeout>;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      script.onload = null;
+      script.onerror = null;
+      if (error) {
+        script.remove();
+        reject(error);
+      } else {
+        resolve((win as any).google.accounts.id);
+      }
+    };
+    script.onload = () => finish((win as any).google?.accounts?.id ? undefined : new Error('خدمة Google غير متاحة الآن. أعد المحاولة.'));
+    script.onerror = () => finish(new Error('تعذّر تحميل تسجيل Google. تحقق من الاتصال وأعد المحاولة.'));
+    timeout = setTimeout(() => finish(new Error('استغرق تحميل Google وقتاً طويلاً. أعد المحاولة.')), timeoutMs);
+    doc.head.appendChild(script);
+  });
+
+  pendingLoad = load.finally(() => { pendingLoad = null; });
+  return pendingLoad;
+}
