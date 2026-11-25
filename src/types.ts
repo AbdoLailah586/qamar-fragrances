@@ -91,6 +91,9 @@ export interface DeliveryAddressFields {
   address_details: string;
   notes?: string;
   customer_whatsapp?: string;
+  google_maps_url?: string;
+  latitude?: number;
+  longitude?: number;
 }
 
 export interface Order {
@@ -104,6 +107,9 @@ export interface Order {
   city: string;
   address_details: string;
   notes?: string;
+  google_maps_url?: string;
+  latitude?: number;
+  longitude?: number;
   items: CartItem[];
   subtotal: number;
   shipping_fee: number;

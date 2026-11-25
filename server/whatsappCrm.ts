@@ -109,8 +109,9 @@ export function buildServerOrderWhatsAppMessage(
       : `${Math.round(Number(order.total || 0))} ج.م.`;
 
   const address = [order.governorate, order.city, order.address_details].filter(Boolean).join(' - ');
+  const mapsUrl = typeof order.google_maps_url === 'string' ? order.google_maps_url.trim() : '';
 
-  return renderTemplate(template, {
+  const rendered = renderTemplate(template, {
     customer_name: order.customer_name || 'عميلنا العزيز',
     order_number: order.order_number || order.id || '',
     items: itemsText || 'منتجات متجر قمر للعطور',
@@ -121,8 +122,14 @@ export function buildServerOrderWhatsAppMessage(
     cod_due: codDue,
     governorate: order.governorate || '',
     address: address || order.governorate || '',
+    maps_url: mapsUrl,
     courier_name: order.courier_name || 'مندوب شحن قمر للعطور'
   });
+
+  if (!customText && mapsUrl && (type === 'order_confirmed' || type === 'shipped') && !rendered.includes(mapsUrl)) {
+    return `${rendered}\n🗺️ موقع التوصيل: ${mapsUrl}`;
+  }
+  return rendered;
 }
 
 export async function ensureWhatsAppNotificationsTable(sql: any) {

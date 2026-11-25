@@ -39,6 +39,7 @@ const googleCred = await import(pathToFileURL(resolve(ROOT, 'lib/googleCredentia
 const googleAuthApi = await import(pathToFileURL(resolve(ROOT, 'api/google-auth.js')).href);
 const arabic = await import(pathToFileURL(resolve(ROOT, 'src/utils/arabicNumbers.ts')).href);
 const delivery = await import(pathToFileURL(resolve(ROOT, 'src/utils/deliveryAddress.ts')).href);
+const egyptLocation = await import(pathToFileURL(resolve(ROOT, 'src/utils/egyptLocation.ts')).href);
 const storeApi = await import(pathToFileURL(resolve(ROOT, 'api/store.ts')).href);
 const whatsappCrm = await import(pathToFileURL(resolve(ROOT, 'server/whatsappCrm.ts')).href);
 
@@ -633,5 +634,68 @@ describe('Customer Account Management & Deletion (Profile / api/store)', () => {
     assert.match(profileSrc, /عناويني/);
     assert.match(profileSrc, /حذف الحساب/);
     assert.match(profileSrc, /deleteAccount/);
+  });
+});
+
+describe('Checkout GPS & Manual Map Location Picker', () => {
+  test('validates safe Google Maps URLs and persists coordinates cleanly via delivery notes', () => {
+    assert.equal(delivery.isGoogleMapsUrl(''), true);
+    assert.equal(delivery.isGoogleMapsUrl('https://www.google.com/maps?q=31.0409,31.3785'), true);
+    assert.equal(delivery.isGoogleMapsUrl('https://maps.app.goo.gl/abc123'), true);
+    assert.equal(delivery.isGoogleMapsUrl('javascript:alert(1)'), false);
+    assert.equal(delivery.isGoogleMapsUrl('https://evil.example.com/maps?q=1,2'), false);
+
+    const url = delivery.coordsToGoogleMapsUrl(31.0409123, 31.3785123);
+    assert.equal(url, 'https://www.google.com/maps?q=31.040912,31.378512');
+
+    const encoded = delivery.encodeDeliveryNotes({
+      city: 'المنصورة',
+      address_details: 'شارع الجمهورية',
+      notes: 'تغليف هدية',
+      customer_whatsapp: '01003732029',
+      google_maps_url: url,
+      latitude: 31.0409123,
+      longitude: 31.3785123
+    });
+    const decoded = delivery.decodeDeliveryNotes(encoded);
+    assert.equal(decoded.google_maps_url, url);
+    assert.equal(decoded.latitude, 31.040912);
+    assert.equal(decoded.longitude, 31.378512);
+
+    const unsafeDecoded = delivery.decodeDeliveryNotes(JSON.stringify({
+      city: 'القاهرة',
+      google_maps_url: 'javascript:alert(1)'
+    }));
+    assert.equal(unsafeDecoded.google_maps_url, undefined);
+  });
+
+  test('matches Arabic/English reverse-geocoded governorate names accurately', () => {
+    assert.equal(egyptLocation.matchGovernorateFromText('محافظة الدقهلية، المنصورة'), 'الدقهلية - المنصورة');
+    assert.equal(egyptLocation.matchGovernorateFromText('Cairo Governorate, Egypt'), 'القاهرة');
+    assert.equal(egyptLocation.matchGovernorateFromText('Alexandria, Egypt'), 'الإسكندرية');
+  });
+
+  test('includes delivery map URL in WhatsApp confirmation when provided and permits geolocation on Vercel', () => {
+    const mapUrl = 'https://www.google.com/maps?q=31.040900,31.378500';
+    const withMap = whatsappCrm.buildServerOrderWhatsAppMessage('order_confirmed', {
+      order_number: 'QMR-2026-999111',
+      customer_name: 'عميل الخريطة',
+      governorate: 'الدقهلية - المنصورة',
+      shipping_fee: 45,
+      total: 495,
+      payment_method: 'cod',
+      google_maps_url: mapUrl,
+      items: []
+    });
+    assert.match(withMap, /https:\/\/www\.google\.com\/maps\?q=31\.040900,31\.378500/);
+
+    const vercelCfg = readFileSync(resolve(ROOT, 'vercel.json'), 'utf8');
+    const checkoutSrc = readFileSync(resolve(ROOT, 'src/pages/Checkout.tsx'), 'utf8');
+    const adminOrdersSrc = readFileSync(resolve(ROOT, 'src/pages/admin/OrdersCrmSupportPanel.tsx'), 'utf8');
+    assert.match(vercelCfg, /geolocation=\(self\)/);
+    assert.doesNotMatch(vercelCfg, /geolocation=\(\)/);
+    assert.match(checkoutSrc, /navigator\.geolocation\.getCurrentPosition/);
+    assert.match(checkoutSrc, /LocationPickerMap/);
+    assert.match(adminOrdersSrc, /google_maps_url/);
   });
 });

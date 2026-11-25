@@ -11,6 +11,7 @@ export function buildQamarOrderWhatsAppMessage(order: Order): string {
     `👤 العميل: ${order.customer_name}`,
     `📞 الهاتف: ${order.customer_phone}`,
     `📍 العنوان: ${order.governorate}${order.city ? ` - ${order.city}` : ''} - ${order.address_details}`,
+    ...(order.google_maps_url ? [`🗺️ موقع الخريطة: ${order.google_maps_url}`] : []),
     ``,
     `🛍️ *العطور المطلوبة:*`,
     lines,
@@ -61,6 +62,7 @@ export function buildQamarCustomerMessage(
       cod_due: codDue,
       governorate: order.governorate || '',
       address,
+      maps_url: order.google_maps_url || '',
       courier_name: order.courier_name || 'مندوب شحن قمر للعطور'
     };
     return customTemplate.replace(/\{([a-z0-9_]+)\}/gi, (_, k) => map[k] ?? '');
@@ -82,6 +84,7 @@ export function buildQamarCustomerMessage(
       `عزيزنا *${order.customer_name}*،`,
       `تم تسليم طلبك رقم *#${order.order_number}* إلى: *${order.courier_name || 'مندوب شحن قمر للعطور'}*.`,
       `📍 العنوان: ${order.governorate}`,
+      ...(order.google_maps_url ? [`🗺️ موقع الخريطة: ${order.google_maps_url}`] : []),
       `💰 المطلوب عند الاستلام: ${codDue}`,
       ``,
       `يرجى إبقاء هاتفك متاحاً للرد على المندوب.`
@@ -134,6 +137,7 @@ export function buildQamarCustomerMessage(
     `🚚 الشحن (${order.governorate}): *${Math.round(order.shipping_fee)} ج.م.*`,
     `💰 *الإجمالي النهائي:* *${Math.round(order.total)} ج.م.* (${paymentLabel})`,
     `📍 العنوان: ${[order.governorate, order.city, order.address_details].filter(Boolean).join(' - ')}`,
+    ...(order.google_maps_url ? [`🗺️ موقع الخريطة: ${order.google_maps_url}`] : []),
     ``,
     `سيصلك إشعار فور شحن الطلب مع المندوب. شرفنا تواصلك!`
   ].join('\n');

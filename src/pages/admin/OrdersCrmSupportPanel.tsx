@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   LayoutDashboard, BarChart3, ShoppingBag, Truck, MessageSquare, PackageCheck,
-  MessageCircle, Star, CheckCircle2, X, Send, ExternalLink
+  MessageCircle, Star, CheckCircle2, X, Send, ExternalLink, MapPin
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { neonDb } from '../../services/neonDb';
@@ -159,7 +159,15 @@ export const OrdersCrmSupportPanel: React.FC<{ section: 'overview' | 'analytics'
                 <tr key={o.id}>
                   <td className="p-3 font-bold whitespace-nowrap" dir="ltr">{o.order_number}</td>
                   <td className="p-3">{o.customer_name}<br /><span className="text-gray-400" dir="ltr">{o.customer_whatsapp || o.customer_phone}</span></td>
-                  <td className="p-3">{o.governorate}</td>
+                  <td className="p-3">
+                    <div>{o.governorate}{o.city ? ` - ${o.city}` : ''}</div>
+                    {o.address_details && <div className="text-[11px] text-gray-500 max-w-[200px] truncate">{o.address_details}</div>}
+                    {o.google_maps_url && (
+                      <a href={o.google_maps_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 mt-1 text-[11px] font-bold text-[#fe9931] hover:underline">
+                        <MapPin className="w-3 h-3" /> خريطة التوصيل
+                      </a>
+                    )}
+                  </td>
                   <td className="p-3 font-bold text-[#fe9931] whitespace-nowrap">{formatEGP(o.total, false)}</td>
                   <td className="p-3">
                     {o.payment_status === 'verified' || o.payment_status === 'paid' ? (

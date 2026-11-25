@@ -1,12 +1,15 @@
-import React, { useState } from 'react';
+import React, { Suspense, useRef, useState } from 'react';
 import confetti from 'canvas-confetti';
-import { Truck, CreditCard, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { Truck, CreditCard, ShieldCheck, CheckCircle2, Navigation, MapPin, Loader2, ExternalLink, X } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { egyptianGovernorates } from '../data/governorates';
 import { formatEGP } from '../utils/arabicNumbers';
-import { normalizePhone } from '../utils/deliveryAddress';
+import { coordsToGoogleMapsUrl, isGoogleMapsUrl, normalizePhone } from '../utils/deliveryAddress';
+import { reverseGeocodeCoords } from '../utils/egyptLocation';
 import type { PaymentMethod } from '../types';
+
+const LocationPickerMap = React.lazy(() => import('../components/LocationPickerMap'));
 
 export const Checkout: React.FC = () => {
   const { cart, cartSubtotal, settings, createOrder, navigate } = useStore();
@@ -19,10 +22,84 @@ export const Checkout: React.FC = () => {
   const [city, setCity] = useState('');
   const [addressDetails, setAddressDetails] = useState('');
   const [notes, setNotes] = useState('');
+  const [googleMapsUrl, setGoogleMapsUrl] = useState('');
+  const [latitude, setLatitude] = useState<number | undefined>(undefined);
+  const [longitude, setLongitude] = useState<number | undefined>(undefined);
+  const [showMapPicker, setShowMapPicker] = useState(false);
+  const [locatingGps, setLocatingGps] = useState(false);
+  const [locationHint, setLocationHint] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
+  const lastAutoFillRef = useRef<{ city: string; address: string }>({ city: '', address: '' });
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cod');
   const [paymentReference, setPaymentReference] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  const applyCoordinates = async (lat: number, lng: number, source: 'gps' | 'map') => {
+    const cleanLat = Number(lat.toFixed(6));
+    const cleanLng = Number(lng.toFixed(6));
+    setLatitude(cleanLat);
+    setLongitude(cleanLng);
+    setGoogleMapsUrl(coordsToGoogleMapsUrl(cleanLat, cleanLng));
+    setLocationHint({
+      tone: 'ok',
+      text: source === 'gps' ? '✓ تم التقاط موقعك عبر GPS وجاري قراءة العنوان...' : '✓ تم تثبيت الدبوس على الخريطة بنجاح.'
+    });
+
+    const geo = await reverseGeocodeCoords(cleanLat, cleanLng);
+    if (geo.governorate) setGovernorate(geo.governorate);
+    if (geo.city) {
+      const prevAutoCity = lastAutoFillRef.current.city;
+      setCity(prev => (!prev.trim() || prev === prevAutoCity ? geo.city! : prev));
+      lastAutoFillRef.current.city = geo.city;
+    }
+    if (geo.address_details) {
+      const prevAutoAddr = lastAutoFillRef.current.address;
+      setAddressDetails(prev => (!prev.trim() || prev === prevAutoAddr ? geo.address_details! : prev));
+      lastAutoFillRef.current.address = geo.address_details;
+    }
+    setLocationHint({
+      tone: 'ok',
+      text: source === 'gps'
+        ? '✓ تم تحديد موقعك تلقائياً وتحديث بيانات التوصيل.'
+        : '✓ تم تحديد موقع التوصيل يدوياً من الخريطة.'
+    });
+  };
+
+  const handleAutoGps = () => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setLocationHint({ tone: 'err', text: 'المتصفح لا يدعم تحديد الموقع التلقائي. يمكنك تحديد موقعك يدوياً من الخريطة.' });
+      setShowMapPicker(true);
+      return;
+    }
+    setLocatingGps(true);
+    setLocationHint(null);
+    navigator.geolocation.getCurrentPosition(
+      async pos => {
+        setShowMapPicker(true);
+        await applyCoordinates(pos.coords.latitude, pos.coords.longitude, 'gps');
+        setLocatingGps(false);
+      },
+      err => {
+        setLocatingGps(false);
+        setShowMapPicker(true);
+        setLocationHint({
+          tone: 'err',
+          text:
+            err?.code === 1
+              ? 'تم رفض إذن الوصول للموقع. يمكنك تفعيل GPS من إعدادات المتصفح أو الضغط على الخريطة لتحديد مكانك يدوياً.'
+              : 'تعذر قراءة موقعك تلقائياً الآن. حدد مكانك يدوياً بالضغط على الخريطة بالأسفل.'
+        });
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }
+    );
+  };
+
+  const handleClearLocation = () => {
+    setLatitude(undefined);
+    setLongitude(undefined);
+    setGoogleMapsUrl('');
+    setLocationHint(null);
+  };
 
   const selectedGov = egyptianGovernorates.find(g => g.name_ar === governorate) || egyptianGovernorates[0];
   const freeThreshold = settings.free_shipping_threshold || 1500;
@@ -53,6 +130,10 @@ export const Checkout: React.FC = () => {
       setError('الاسم والعنوان بالتفصيل مطلوبان.');
       return;
     }
+    if (googleMapsUrl.trim() && !isGoogleMapsUrl(googleMapsUrl)) {
+      setError('أدخل رابط خرائط جوجل (Google Maps) صحيح يبدأ بـ https:// أو حدد الموقع من الخريطة.');
+      return;
+    }
     setSubmitting(true);
     try {
       await createOrder({
@@ -64,6 +145,9 @@ export const Checkout: React.FC = () => {
         city: city.trim(),
         address_details: addressDetails.trim(),
         notes: notes.trim(),
+        google_maps_url: googleMapsUrl.trim() || undefined,
+        latitude,
+        longitude,
         items: cart,
         subtotal: cartSubtotal,
         shipping_fee: shippingFee,
@@ -99,6 +183,31 @@ export const Checkout: React.FC = () => {
               <span>بيانات التوصيل</span>
             </h2>
 
+            {user?.addresses && user.addresses.length > 0 && (
+              <div className="bg-gray-50 border border-gray-100 rounded-xl p-3 space-y-2">
+                <p className="text-[11px] font-bold text-gray-500">اختر من عناوينك المحفوظة:</p>
+                <div className="flex flex-wrap gap-2">
+                  {user.addresses.map(addr => (
+                    <button
+                      key={addr.id}
+                      type="button"
+                      onClick={() => {
+                        setGovernorate(addr.governorate || 'الدقهلية - المنصورة');
+                        setCity(addr.city || '');
+                        setAddressDetails(addr.address_details || addr.details || '');
+                        setGoogleMapsUrl(addr.google_maps_url || '');
+                        setLatitude(addr.latitude);
+                        setLongitude(addr.longitude);
+                      }}
+                      className="px-3 py-1.5 rounded-full bg-white border border-gray-200 hover:border-[#fe9931] text-xs font-bold text-[#252a31] transition-colors"
+                    >
+                      {addr.title || addr.governorate}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-bold text-gray-700 mb-1">الاسم الكامل</label>
@@ -128,6 +237,127 @@ export const Checkout: React.FC = () => {
                 <label className="block text-xs font-bold text-gray-700 mb-1">المدينة / المركز</label>
                 <input type="text" value={city} onChange={e => setCity(e.target.value)}
                   className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-[#fe9931]" />
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-orange-100 bg-[#fff9f2] p-4 space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div>
+                  <h3 className="text-xs font-extrabold text-[#252a31] flex items-center gap-1.5">
+                    <MapPin className="w-4 h-4 text-[#fe9931]" />
+                    <span>تحديد موقع التوصيل بدقة (GPS أو الخريطة)</span>
+                  </h3>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    حدد موقعك الحالي بضغطة زر أو اختر مكانك يدوياً من الخريطة لتسهيل وصول المندوب.
+                  </p>
+                </div>
+                {(googleMapsUrl || (latitude !== undefined && longitude !== undefined)) && (
+                  <button
+                    type="button"
+                    onClick={handleClearLocation}
+                    className="text-[11px] font-bold text-gray-500 hover:text-red-600 flex items-center gap-1 px-2.5 py-1 rounded-full bg-white border border-gray-200"
+                  >
+                    <X className="w-3 h-3" /> مسح الموقع
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  data-testid="btn-auto-gps"
+                  onClick={handleAutoGps}
+                  disabled={locatingGps}
+                  className="min-h-[44px] px-4 py-2.5 rounded-xl bg-[#fe9931] hover:bg-[#e88520] disabled:opacity-70 text-white text-xs font-bold flex items-center justify-center gap-2 transition-colors shadow-sm"
+                >
+                  {locatingGps ? <Loader2 className="w-4 h-4 animate-spin" /> : <Navigation className="w-4 h-4" />}
+                  <span>{locatingGps ? 'جاري تحديد موقعك...' : 'تحديد موقعي تلقائياً (GPS)'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="btn-manual-map"
+                  onClick={() => setShowMapPicker(prev => !prev)}
+                  className={`min-h-[44px] px-4 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-colors ${
+                    showMapPicker
+                      ? 'bg-[#252a31] text-white border-[#252a31]'
+                      : 'bg-white text-[#252a31] border-gray-300 hover:border-[#fe9931]'
+                  }`}
+                >
+                  <MapPin className="w-4 h-4 text-[#fe9931]" />
+                  <span>{showMapPicker ? 'إخفاء الخريطة التفاعلية' : 'تحديد الموقع يدوياً من الخريطة'}</span>
+                </button>
+              </div>
+
+              {locationHint && (
+                <div
+                  className={`px-3 py-2 rounded-xl text-xs font-semibold border ${
+                    locationHint.tone === 'ok'
+                      ? 'bg-green-50 text-green-800 border-green-200'
+                      : 'bg-amber-50 text-amber-800 border-amber-200'
+                  }`}
+                >
+                  {locationHint.text}
+                </div>
+              )}
+
+              {showMapPicker && (
+                <Suspense
+                  fallback={
+                    <div className="h-64 sm:h-72 rounded-2xl border border-orange-200 bg-white flex flex-col items-center justify-center gap-2 text-xs font-bold text-gray-500">
+                      <Loader2 className="w-5 h-5 animate-spin text-[#fe9931]" />
+                      <span>جاري تحميل الخريطة التفاعلية...</span>
+                    </div>
+                  }
+                >
+                  <LocationPickerMap
+                    governorate={governorate}
+                    latitude={latitude}
+                    longitude={longitude}
+                    onSelectCoords={(lat, lng) => {
+                      void applyCoordinates(lat, lng, 'map');
+                    }}
+                  />
+                </Suspense>
+              )}
+
+              <div>
+                <div className="flex items-center justify-between gap-2 flex-wrap mb-1.5">
+                  <label className="text-[11px] font-bold text-gray-600">رابط الموقع على خرائط جوجل</label>
+                  {googleMapsUrl && isGoogleMapsUrl(googleMapsUrl) && (
+                    <a
+                      href={googleMapsUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="shrink-0 whitespace-nowrap text-[11px] font-bold text-[#fe9931] hover:underline inline-flex items-center gap-1"
+                    >
+                      <span>معاينة الموقع</span>
+                      <ExternalLink className="w-3 h-3 shrink-0" />
+                    </a>
+                  )}
+                </div>
+                <input
+                  type="url"
+                  dir="ltr"
+                  data-testid="input-google-maps-url"
+                  value={googleMapsUrl}
+                  onChange={e => {
+                    setGoogleMapsUrl(e.target.value);
+                    setLatitude(undefined);
+                    setLongitude(undefined);
+                  }}
+                  placeholder="https://www.google.com/maps?q=..."
+                  className={`w-full px-3.5 py-2 rounded-xl border text-xs bg-white focus:outline-none ${
+                    googleMapsUrl && !isGoogleMapsUrl(googleMapsUrl)
+                      ? 'border-red-400 focus:border-red-500'
+                      : 'border-gray-200 focus:border-[#fe9931]'
+                  }`}
+                />
+                {googleMapsUrl && !isGoogleMapsUrl(googleMapsUrl) && (
+                  <p className="text-[11px] text-red-600 font-semibold mt-1">
+                    يرجى إدخال رابط خرائط جوجل (Google Maps) صحيح يبدأ بـ https://
+                  </p>
+                )}
               </div>
             </div>
 

@@ -39,6 +39,14 @@ export const OrderSuccess: React.FC = () => {
           <div className="flex justify-between"><span className="text-gray-500">الاسم:</span><span className="font-bold">{currentOrder.customer_name}</span></div>
           <div className="flex justify-between"><span className="text-gray-500">الهاتف:</span><span className="font-bold" dir="ltr">{currentOrder.customer_phone}</span></div>
           <div className="flex justify-between"><span className="text-gray-500">الإجمالي:</span><span className="font-bold text-[#fe9931]">{formatEGP(currentOrder.total)}</span></div>
+          {currentOrder.google_maps_url && (
+            <div className="flex justify-between items-center pt-1">
+              <span className="text-gray-500">موقع التوصيل:</span>
+              <a href={currentOrder.google_maps_url} target="_blank" rel="noreferrer" className="text-xs font-bold text-[#fe9931] hover:underline">
+                عرض على خرائط جوجل ↗
+              </a>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
