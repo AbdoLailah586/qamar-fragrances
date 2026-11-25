@@ -7,6 +7,7 @@
   --theme-ink-normal: #4f4335;
   --theme-ink-subdued: #585757;
   --theme-bg: #FCFCFD;
+  --ease-luxury: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 html {
@@ -33,6 +34,154 @@ a {
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* Luxury Motion & Page Transitions */
+@keyframes qamarPageEnter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes qamarHeroKenBurns {
+  0% {
+    opacity: 0.72;
+    transform: scale(1.09);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes qamarHeroUp {
+  0% {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes qamarCardReveal {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes qamarImgFade {
+  0% {
+    opacity: 0.35;
+    transform: scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes qamarFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes qamarSlideLeft {
+  from {
+    opacity: 0.6;
+    transform: translateX(-100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes qamarShimmer {
+  0% { transform: translateX(130%) skewX(-20deg); }
+  35%, 100% { transform: translateX(-230%) skewX(-20deg); }
+}
+
+@keyframes qamarFloatSoft {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+.qamar-page-enter {
+  animation: qamarPageEnter 0.42s var(--ease-luxury) both;
+}
+
+.qamar-hero-kenburns {
+  animation: qamarHeroKenBurns 1.4s var(--ease-luxury) both;
+  will-change: transform, opacity;
+}
+
+.qamar-hero-up {
+  animation: qamarHeroUp 0.75s var(--ease-luxury) both;
+}
+
+.qamar-delay-100 { animation-delay: 90ms; }
+.qamar-delay-200 { animation-delay: 190ms; }
+.qamar-delay-300 { animation-delay: 290ms; }
+
+.qamar-card-reveal {
+  animation: qamarCardReveal 0.55s var(--ease-luxury) both;
+}
+
+.qamar-img-fade {
+  animation: qamarImgFade 0.4s var(--ease-luxury) both;
+}
+
+.qamar-fade-in {
+  animation: qamarFadeIn 0.28s ease-out both;
+}
+
+.qamar-slide-left {
+  animation: qamarSlideLeft 0.34s var(--ease-luxury) both;
+}
+
+.qamar-cta-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.qamar-cta-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 45%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.32), transparent);
+  animation: qamarShimmer 4.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.qamar-float-soft {
+  animation: qamarFloatSoft 3.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .qamar-page-enter,
+  .qamar-hero-kenburns,
+  .qamar-hero-up,
+  .qamar-card-reveal,
+  .qamar-img-fade,
+  .qamar-fade-in,
+  .qamar-slide-left,
+  .qamar-float-soft,
+  .qamar-cta-shimmer::after {
+    animation: none !important;
+  }
 }
 
 /* Custom scrollbar for clean drawers */

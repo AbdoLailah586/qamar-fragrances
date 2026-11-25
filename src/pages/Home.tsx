@@ -25,33 +25,34 @@ export const Home: React.FC = () => {
 
   return (
     <main className="w-full bg-white pb-6 md:pb-0">
-      {/* 1. Hero Banner (Tailored mobile rounded card feel vs wide desktop hero) */}
-      <section className="relative w-full min-h-[260px] md:min-h-[320px] md:aspect-[16/5] flex items-center justify-center overflow-hidden bg-[#8b8175] rounded-b-3xl md:rounded-none shadow-sm md:shadow-none">
+      {/* 1. Hero Banner (Subtle Ken Burns settle + staggered CTA reveal on initial page open) */}
+      <section className="relative w-full min-h-[260px] md:min-h-[340px] md:aspect-[16/5] flex items-center justify-center overflow-hidden bg-[#8b8175] rounded-b-3xl md:rounded-none shadow-sm md:shadow-none group">
         <img
           src={settings.hero_image || '/qamar-images/a182f7810c27ec59.webp'}
           alt={settings.hero_heading}
-          className="hidden md:block absolute inset-0 w-full h-full object-cover"
+          className="hidden md:block absolute inset-0 w-full h-full object-cover qamar-hero-kenburns transition-transform duration-1000 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:scale-[1.03]"
         />
         <img
           src={settings.hero_mobile_image || settings.hero_image || '/qamar-images/66b77b422345ca7e.webp'}
           alt={settings.hero_heading}
-          className="md:hidden absolute inset-0 w-full h-full object-cover"
+          className="md:hidden absolute inset-0 w-full h-full object-cover qamar-hero-kenburns"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/30 to-black/15 md:bg-black/25" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/30 to-black/15 md:bg-gradient-to-b md:from-black/20 md:via-black/25 md:to-black/40" />
+        <div className="pointer-events-none absolute -top-24 left-1/4 w-72 h-72 rounded-full bg-[#fe9931]/20 blur-3xl qamar-float-soft" />
 
         <div className="relative z-10 max-w-4xl mx-auto px-5 text-center text-white py-9 md:py-12">
-          <h1 className="text-2xl sm:text-4xl md:text-[42px] font-extrabold leading-tight drop-shadow-sm">
+          <h1 className="text-2xl sm:text-4xl md:text-[42px] font-extrabold leading-tight drop-shadow-sm qamar-hero-up qamar-delay-100">
             {settings.hero_heading}
           </h1>
-          <p className="mt-2.5 md:mt-4 text-xs sm:text-sm md:text-[15px] text-white/95 max-w-2xl mx-auto leading-relaxed drop-shadow-sm line-clamp-3 md:line-clamp-none">
+          <p className="mt-2.5 md:mt-4 text-xs sm:text-sm md:text-[15px] text-white/95 max-w-2xl mx-auto leading-relaxed drop-shadow-sm line-clamp-3 md:line-clamp-none qamar-hero-up qamar-delay-200">
             {settings.hero_subheading}
           </p>
 
-          <div className="mt-5 md:mt-6 flex flex-wrap items-center justify-center gap-2.5 md:gap-3">
+          <div className="mt-5 md:mt-6 flex flex-wrap items-center justify-center gap-2.5 md:gap-3 qamar-hero-up qamar-delay-300">
             <button
               type="button"
               onClick={() => navigate('shop', { category: 'all', search: '' })}
-              className="px-6 md:px-7 py-2.5 rounded-full bg-[#fe9931] hover:bg-[#e88722] text-white font-bold text-xs sm:text-sm shadow-md transition"
+              className="qamar-cta-shimmer px-6 md:px-7 py-2.5 rounded-full bg-[#fe9931] hover:bg-[#e88722] text-white font-bold text-xs sm:text-sm shadow-lg shadow-black/15 hover:-translate-y-0.5 active:scale-95 transition-all duration-300"
             >
               تسوق الأن
             </button>
@@ -59,7 +60,7 @@ export const Home: React.FC = () => {
               href={whatsappUrl(settings.whatsapp_number)}
               target="_blank"
               rel="noreferrer"
-              className="px-6 md:px-7 py-2.5 rounded-full bg-white hover:bg-gray-100 text-[#252a31] font-bold text-xs sm:text-sm shadow-md transition"
+              className="px-6 md:px-7 py-2.5 rounded-full bg-white/95 hover:bg-white text-[#252a31] font-bold text-xs sm:text-sm shadow-md hover:-translate-y-0.5 active:scale-95 transition-all duration-300"
             >
               تواصل معنا
             </a>
@@ -102,23 +103,24 @@ export const Home: React.FC = () => {
 
         {/* Laptop Desktop 4-col Grid Carousel */}
         <div className="hidden md:grid md:grid-cols-4 gap-6">
-          {shownCollections.map(col => (
+          {shownCollections.map((col, idx) => (
             <button
               key={col.id}
               type="button"
+              style={{ animationDelay: `${idx * 70}ms` }}
               onClick={() => navigate('shop', { category: col.handle, search: '' })}
-              className="group relative rounded-2xl overflow-hidden bg-gray-100 aspect-[4/3] text-right shadow-sm border border-gray-100 focus:outline-none"
+              className="qamar-card-reveal group relative rounded-2xl overflow-hidden bg-gray-100 aspect-[4/3] text-right shadow-sm border border-gray-100 hover:-translate-y-1 hover:shadow-lg transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] focus:outline-none"
             >
               <img
                 src={col.image}
                 alt={col.title}
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                className="w-full h-full object-cover will-change-transform group-hover:scale-[1.07] transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)]"
               />
               <div className="absolute inset-x-3 bottom-3 bg-white/95 backdrop-blur-sm rounded-xl px-3.5 py-2.5 flex items-center justify-between shadow-sm">
                 <span className="text-sm font-bold text-[#252a31] truncate">
                   {col.title}
                 </span>
-                <ChevronLeft className="w-4 h-4 text-[#252a31] shrink-0 group-hover:-translate-x-0.5 transition" />
+                <ChevronLeft className="w-4 h-4 text-[#252a31] shrink-0 group-hover:-translate-x-1 transition-transform duration-300" />
               </div>
             </button>
           ))}
@@ -189,9 +191,9 @@ export const Home: React.FC = () => {
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-5 md:gap-7">
-            {fallbackFeatured.map(p => (
-              <ProductCard key={p.id} product={p} />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 md:gap-7">
+            {fallbackFeatured.map((p, idx) => (
+              <ProductCard key={p.id} product={p} index={idx} />
             ))}
           </div>
         )}

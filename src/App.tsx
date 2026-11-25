@@ -21,7 +21,13 @@ import { Profile } from './pages/Profile';
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
 
 const StorefrontRouter: React.FC = () => {
-  const { currentTab } = useStore();
+  const { currentTab, selectedCategory, selectedProduct } = useStore();
+  const routeKey =
+    currentTab === 'product'
+      ? `product-${selectedProduct?.id || ''}`
+      : currentTab === 'shop'
+        ? `shop-${selectedCategory || 'all'}`
+        : currentTab;
 
   if (currentTab === 'admin') {
     return (
@@ -38,7 +44,7 @@ const StorefrontRouter: React.FC = () => {
     <div className="min-h-screen flex flex-col bg-white">
       <PwaStatus />
       <Navbar />
-      <div className="flex-1">
+      <div key={routeKey} className="flex-1 qamar-page-enter">
         {currentTab === 'home' && <Home />}
         {currentTab === 'shop' && <Shop />}
         {currentTab === 'product' && <ProductDetails />}

@@ -17,9 +17,9 @@ export const CartDrawer: React.FC = () => {
   if (!isCartOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex">
+    <div className="fixed inset-0 z-50 flex qamar-fade-in">
       {/* Drawer anchored to the left (matching Qamar RTL cart drawer) */}
-      <div className="relative w-full max-w-[380px] bg-white h-full shadow-2xl flex flex-col z-10 animate-in slide-in-from-left duration-200">
+      <div className="relative w-full max-w-[380px] bg-white h-full shadow-2xl flex flex-col z-10 qamar-slide-left">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
           <div className="flex items-center gap-2 text-[#252a31] font-bold text-base">
             <ShoppingCart className="w-5 h-5" />

@@ -194,9 +194,9 @@ export const Shop: React.FC = () => {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-5 md:gap-7">
-          {pageProducts.map(p => (
-            <ProductCard key={p.id} product={p} />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 md:gap-7">
+          {pageProducts.map((p, idx) => (
+            <ProductCard key={p.id} product={p} index={idx} />
           ))}
         </div>
       )}

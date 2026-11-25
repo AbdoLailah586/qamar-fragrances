@@ -23,6 +23,8 @@ export const ProductDetails: React.FC = () => {
   const product = selectedProduct || products[0] || null;
 
   const [activeImgIdx, setActiveImgIdx] = useState(0);
+  const [zoomOrigin, setZoomOrigin] = useState('50% 50%');
+  const [isZooming, setIsZooming] = useState(false);
   const [selectedVariantIdx, setSelectedVariantIdx] = useState(0);
   const [qty, setQty] = useState(1);
   const [activeTab, setActiveTab] = useState<'desc' | 'reviews'>('desc');
@@ -104,27 +106,45 @@ export const ProductDetails: React.FC = () => {
 
       {/* Main 2-column Product Showcase */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 md:gap-12 items-start">
-        {/* Image Gallery (Right in RTL) */}
+        {/* Image Gallery with silky cross-fade & interactive cursor zoom */}
         <div className="lg:col-span-5 space-y-3">
-          <div className="relative aspect-square rounded-2xl overflow-hidden bg-[#f8f9fa] border border-gray-100">
+          <div
+            onMouseEnter={() => setIsZooming(true)}
+            onMouseLeave={() => { setIsZooming(false); setZoomOrigin('50% 50%'); }}
+            onMouseMove={e => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const x = ((e.clientX - rect.left) / rect.width) * 100;
+              const y = ((e.clientY - rect.top) / rect.height) * 100;
+              setZoomOrigin(`${x.toFixed(1)}% ${y.toFixed(1)}%`);
+            }}
+            className="relative aspect-square rounded-2xl overflow-hidden bg-[#f8f9fa] border border-gray-100 cursor-zoom-in group"
+          >
             <img
+              key={images[activeImgIdx] || images[0]}
               src={images[activeImgIdx] || images[0]}
               alt={product.name_ar}
-              className="w-full h-full object-cover"
+              style={{
+                transformOrigin: zoomOrigin,
+                transform: isZooming ? 'scale(1.42)' : 'scale(1)'
+              }}
+              className="w-full h-full object-cover qamar-img-fade will-change-transform transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
             />
+            <span className="hidden md:inline-block pointer-events-none absolute bottom-3 left-3 px-2.5 py-1 rounded-full bg-white/85 backdrop-blur-sm text-[11px] font-bold text-[#4f4335] opacity-80 group-hover:opacity-0 transition-opacity duration-300 shadow-xs">
+              مرّر للتكبير ✨
+            </span>
             {images.length > 1 && (
               <>
                 <button
                   type="button"
-                  onClick={() => setActiveImgIdx(i => (i - 1 + images.length) % images.length)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 shadow flex items-center justify-center text-[#252a31] hover:text-[#fe9931]"
+                  onClick={e => { e.stopPropagation(); setActiveImgIdx(i => (i - 1 + images.length) % images.length); }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 shadow flex items-center justify-center text-[#252a31] hover:text-[#fe9931] hover:scale-110 active:scale-95 transition-all"
                 >
                   <ChevronRight className="w-5 h-5" />
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveImgIdx(i => (i + 1) % images.length)}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 shadow flex items-center justify-center text-[#252a31] hover:text-[#fe9931]"
+                  onClick={e => { e.stopPropagation(); setActiveImgIdx(i => (i + 1) % images.length); }}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 shadow flex items-center justify-center text-[#252a31] hover:text-[#fe9931] hover:scale-110 active:scale-95 transition-all"
                 >
                   <ChevronLeft className="w-5 h-5" />
                 </button>
@@ -139,8 +159,9 @@ export const ProductDetails: React.FC = () => {
                   key={idx}
                   type="button"
                   onClick={() => setActiveImgIdx(idx)}
-                  className={`w-16 h-16 rounded-xl overflow-hidden border-2 shrink-0 transition ${
-                    activeImgIdx === idx ? 'border-[#fe9931]' : 'border-gray-200 opacity-70 hover:opacity-100'
+                  onMouseEnter={() => setActiveImgIdx(idx)}
+                  className={`w-16 h-16 rounded-xl overflow-hidden border-2 shrink-0 transition-all duration-300 ${
+                    activeImgIdx === idx ? 'border-[#fe9931] scale-105 shadow-xs' : 'border-gray-200 opacity-70 hover:opacity-100'
                   }`}
                 >
                   <img src={src} alt="" className="w-full h-full object-cover" />

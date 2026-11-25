@@ -543,6 +543,16 @@ describe('Installable PWA & Mobile/Desktop Responsive Contracts', () => {
     const bottomSrc = readFileSync(resolve(ROOT, 'src/components/MobileBottomNav.tsx'), 'utf8');
     assert.match(appSrc, /PwaStatus/);
     assert.match(appSrc, /MobileBottomNav/);
+    assert.match(appSrc, /qamar-page-enter/);
     assert.match(bottomSrc, /md:hidden/);
+  });
+
+  test('ProductCard shows second image on hover with silky zoom and Home Hero animates on open', () => {
+    const cardSrc = readFileSync(resolve(ROOT, 'src/components/ProductCard.tsx'), 'utf8');
+    const homeSrc = readFileSync(resolve(ROOT, 'src/pages/Home.tsx'), 'utf8');
+    assert.match(cardSrc, /product\.images\?\.\[1\]/);
+    assert.match(cardSrc, /group-hover:opacity-100/);
+    assert.match(homeSrc, /qamar-hero-kenburns/);
+    assert.match(homeSrc, /qamar-hero-up/);
   });
 });
