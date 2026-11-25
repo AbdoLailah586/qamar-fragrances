@@ -32,6 +32,21 @@ export const Footer: React.FC = () => {
           </button>
         </div>
 
+        <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs font-semibold text-gray-500">
+          <button type="button" onClick={() => navigate('terms')} className="hover:text-[#fe9931] transition">
+            شروط الاستخدام
+          </button>
+          <button type="button" onClick={() => navigate('privacy')} className="hover:text-[#fe9931] transition">
+            سياسة الخصوصية
+          </button>
+          <button type="button" onClick={() => navigate('refund')} className="hover:text-[#fe9931] transition">
+            الاستبدال والاسترجاع
+          </button>
+          <button type="button" onClick={() => navigate('shipping')} className="hover:text-[#fe9931] transition">
+            الشحن والتوصيل
+          </button>
+        </div>
+
         <SocialIconLinks variant="footer" />
 
         <InstallAppButton />

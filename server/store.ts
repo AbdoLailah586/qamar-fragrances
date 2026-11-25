@@ -16,6 +16,18 @@ const sql: any = Object.assign((strings: any, ...values: any[]) => queryClient()
   query: (...args: any[]) => (queryClient().query as any)(...args)
 });
 
+let userCrmSchemaEnsured = false;
+async function ensureUserCrmColumns() {
+  if (userCrmSchemaEnsured) return;
+  try {
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;`;
+    await sql`ALTER TABLE active_carts ADD COLUMN IF NOT EXISTS customer_id VARCHAR(100);`;
+    await sql`ALTER TABLE active_carts ADD COLUMN IF NOT EXISTS customer_email VARCHAR(255);`;
+    await sql`CREATE INDEX IF NOT EXISTS customer_activity_customer_idx ON customer_activity(customer_id, created_at DESC);`;
+    userCrmSchemaEnsured = true;
+  } catch {}
+}
+
 function mapRowToProduct(row: any): Product {
   const specsObj = row.specs && typeof row.specs === 'object' ? row.specs : {};
   const details = specsObj.__product_data && typeof specsObj.__product_data === 'object' ? specsObj.__product_data : {};
@@ -373,23 +385,33 @@ export const neonDb = {
 
   async trackActivity(activity: { sessionId: string; customerId?: string; actionType: string; targetId?: string; metadata?: Record<string, any> }) {
     try {
+      await ensureUserCrmColumns();
       await sql`
         INSERT INTO customer_activity (session_id, customer_id, action_type, target_id, metadata)
         VALUES (${activity.sessionId}, ${activity.customerId || null}, ${activity.actionType}, ${activity.targetId || null}, ${JSON.stringify(activity.metadata || {})}::jsonb);
       `;
+      if (activity.customerId) {
+        await sql`UPDATE users SET last_seen_at = NOW() WHERE id = ${activity.customerId};`;
+        if (activity.sessionId) {
+          await sql`UPDATE customer_activity SET customer_id = ${activity.customerId} WHERE session_id = ${activity.sessionId} AND customer_id IS NULL;`;
+        }
+      }
     } catch {}
   },
 
-  async syncActiveCart(cart: { sessionId: string; customerName?: string; customerPhone?: string; items: any[]; subtotal: number }) {
+  async syncActiveCart(cart: { sessionId: string; customerId?: string; customerEmail?: string; customerName?: string; customerPhone?: string; items: any[]; subtotal: number }) {
     try {
+      await ensureUserCrmColumns();
       if (!cart.items || cart.items.length === 0) {
         await sql`DELETE FROM active_carts WHERE session_id = ${cart.sessionId};`;
         return;
       }
       await sql`
-        INSERT INTO active_carts (session_id, customer_name, customer_phone, items, subtotal, is_abandoned, last_updated_at)
-        VALUES (${cart.sessionId}, ${cart.customerName || null}, ${cart.customerPhone || null}, ${JSON.stringify(cart.items)}::jsonb, ${cart.subtotal}, false, NOW())
+        INSERT INTO active_carts (session_id, customer_id, customer_email, customer_name, customer_phone, items, subtotal, is_abandoned, last_updated_at)
+        VALUES (${cart.sessionId}, ${cart.customerId || null}, ${cart.customerEmail || null}, ${cart.customerName || null}, ${cart.customerPhone || null}, ${JSON.stringify(cart.items)}::jsonb, ${cart.subtotal}, false, NOW())
         ON CONFLICT (session_id) DO UPDATE SET
+          customer_id = COALESCE(EXCLUDED.customer_id, active_carts.customer_id),
+          customer_email = COALESCE(EXCLUDED.customer_email, active_carts.customer_email),
           customer_name = COALESCE(EXCLUDED.customer_name, active_carts.customer_name),
           customer_phone = COALESCE(EXCLUDED.customer_phone, active_carts.customer_phone),
           items = EXCLUDED.items,
@@ -397,6 +419,9 @@ export const neonDb = {
           is_abandoned = false,
           last_updated_at = NOW();
       `;
+      if (cart.customerId) {
+        await sql`UPDATE users SET last_seen_at = NOW() WHERE id = ${cart.customerId};`;
+      }
     } catch {}
   },
 
@@ -430,8 +455,208 @@ export const neonDb = {
 
   async getAllUsers() {
     try {
-      return await sql`SELECT id, name, email, phone, avatar, role, provider, email_verified, addresses, created_at, admin_permissions FROM users ORDER BY created_at DESC;`;
-    } catch { return []; }
+      await ensureUserCrmColumns();
+      return await sql`
+        SELECT
+          u.id, u.name, u.email, u.phone, u.avatar, u.role, u.provider,
+          u.email_verified, u.addresses, u.created_at, u.updated_at, u.last_seen_at, u.admin_permissions,
+          COALESCE((
+            SELECT COUNT(*)::int FROM orders o
+            WHERE (o.customer_email IS NOT NULL AND lower(o.customer_email) = lower(u.email))
+               OR o.customer_id = u.id
+               OR (NULLIF(u.phone, '') IS NOT NULL AND o.customer_phone = u.phone)
+          ), 0) AS orders_count,
+          COALESCE((
+            SELECT COUNT(*)::int FROM orders o
+            WHERE o.status <> 'cancelled'
+              AND ((o.customer_email IS NOT NULL AND lower(o.customer_email) = lower(u.email))
+                OR o.customer_id = u.id
+                OR (NULLIF(u.phone, '') IS NOT NULL AND o.customer_phone = u.phone))
+          ), 0) AS completed_orders_count,
+          COALESCE((
+            SELECT SUM(o.total)::numeric FROM orders o
+            WHERE o.status <> 'cancelled'
+              AND ((o.customer_email IS NOT NULL AND lower(o.customer_email) = lower(u.email))
+                OR o.customer_id = u.id
+                OR (NULLIF(u.phone, '') IS NOT NULL AND o.customer_phone = u.phone))
+          ), 0) AS total_spent,
+          COALESCE((
+            SELECT SUM(CASE WHEN jsonb_typeof(ac.items) = 'array' THEN jsonb_array_length(ac.items) ELSE 0 END)::int
+            FROM active_carts ac
+            WHERE ac.customer_id = u.id
+               OR (ac.customer_email IS NOT NULL AND lower(ac.customer_email) = lower(u.email))
+               OR (NULLIF(u.phone, '') IS NOT NULL AND ac.customer_phone = u.phone)
+          ), 0) AS cart_items_count,
+          COALESCE((
+            SELECT SUM(ac.subtotal)::numeric FROM active_carts ac
+            WHERE ac.customer_id = u.id
+               OR (ac.customer_email IS NOT NULL AND lower(ac.customer_email) = lower(u.email))
+               OR (NULLIF(u.phone, '') IS NOT NULL AND ac.customer_phone = u.phone)
+          ), 0) AS cart_subtotal,
+          COALESCE((
+            SELECT COUNT(DISTINCT ca.target_id)::int FROM customer_activity ca
+            WHERE ca.customer_id = u.id AND ca.action_type = 'view_product'
+          ), 0) AS views_count,
+          GREATEST(
+            u.last_seen_at,
+            u.updated_at,
+            (SELECT MAX(ca.created_at) FROM customer_activity ca WHERE ca.customer_id = u.id),
+            (SELECT MAX(s.created_at) FROM app_sessions s WHERE s.user_id = u.id),
+            (SELECT MAX(o.created_at) FROM orders o WHERE (o.customer_email IS NOT NULL AND lower(o.customer_email) = lower(u.email)) OR o.customer_id = u.id)
+          ) AS last_activity_at
+        FROM users u
+        ORDER BY u.created_at DESC;
+      `;
+    } catch {
+      try {
+        return await sql`SELECT id, name, email, phone, avatar, role, provider, email_verified, addresses, created_at, updated_at, admin_permissions FROM users ORDER BY created_at DESC;`;
+      } catch {
+        return [];
+      }
+    }
+  },
+
+  async getUserInsights(userId: string) {
+    try {
+      await ensureUserCrmColumns();
+      const userRows = await sql`
+        SELECT id, name, email, phone, avatar, role, provider, email_verified, addresses, created_at, updated_at, last_seen_at, admin_permissions
+        FROM users WHERE id = ${userId} LIMIT 1;
+      `;
+      const u = userRows[0];
+      if (!u) return { success: false, error: 'الحساب غير موجود.' };
+      const cleanPhone = String(u.phone || '').trim();
+      const emailLower = String(u.email || '').trim().toLowerCase();
+
+      const [recentViews, recentActions, carts, orderRows, reviews] = await Promise.all([
+        sql`
+          SELECT
+            ca.target_id AS product_id,
+            MAX(ca.created_at) AS viewed_at,
+            COUNT(*)::int AS view_count,
+            COALESCE(p.name_ar, MAX(ca.metadata->>'name_ar'), ca.target_id) AS name_ar,
+            COALESCE(p.handle, MAX(ca.metadata->>'handle'), ca.target_id) AS handle,
+            COALESCE(p.category, MAX(ca.metadata->>'category'), '') AS category,
+            COALESCE(p.price, 0)::numeric AS price,
+            COALESCE(p.images, '[]'::jsonb) AS images
+          FROM customer_activity ca
+          LEFT JOIN products p ON p.id = ca.target_id
+          WHERE ca.action_type = 'view_product'
+            AND ca.target_id IS NOT NULL
+            AND (
+              ca.customer_id = ${u.id}
+              OR ca.session_id IN (SELECT DISTINCT session_id FROM customer_activity WHERE customer_id = ${u.id})
+              OR ca.session_id IN (
+                SELECT session_id FROM active_carts
+                WHERE customer_id = ${u.id}
+                   OR (customer_email IS NOT NULL AND lower(customer_email) = ${emailLower})
+                   OR (${cleanPhone} <> '' AND customer_phone = ${cleanPhone})
+              )
+            )
+          GROUP BY ca.target_id, p.name_ar, p.handle, p.category, p.price, p.images
+          ORDER BY MAX(ca.created_at) DESC
+          LIMIT 15;
+        `.catch(() => []),
+        sql`
+          SELECT action_type, target_id, metadata, created_at
+          FROM customer_activity
+          WHERE customer_id = ${u.id}
+          ORDER BY created_at DESC
+          LIMIT 25;
+        `.catch(() => []),
+        sql`
+          SELECT * FROM active_carts
+          WHERE customer_id = ${u.id}
+             OR (customer_email IS NOT NULL AND lower(customer_email) = ${emailLower})
+             OR (${cleanPhone} <> '' AND customer_phone = ${cleanPhone})
+          ORDER BY last_updated_at DESC
+          LIMIT 5;
+        `.catch(() => []),
+        sql`
+          SELECT * FROM orders
+          WHERE (customer_email IS NOT NULL AND lower(customer_email) = ${emailLower})
+             OR customer_id = ${u.id}
+             OR (${cleanPhone} <> '' AND customer_phone = ${cleanPhone})
+          ORDER BY created_at DESC
+          LIMIT 100;
+        `.catch(() => []),
+        sql`
+          SELECT id, product_id, product_name_ar, rating, comment, status, created_at
+          FROM product_reviews
+          WHERE user_id = ${u.id}
+             OR (${cleanPhone} <> '' AND author_phone = ${cleanPhone})
+          ORDER BY created_at DESC
+          LIMIT 20;
+        `.catch(() => [])
+      ]);
+
+      const orders = (orderRows as any[]).map(mapRowToOrder);
+      const executedOrders = orders.filter(o => o.order_status !== 'cancelled');
+      const deliveredOrders = orders.filter(o => o.order_status === 'delivered');
+      const cancelledOrders = orders.filter(o => o.order_status === 'cancelled');
+      const totalSpent = executedOrders.reduce((s, o) => s + Number(o.total || 0), 0);
+
+      const categoryMap = new Map<string, number>();
+      for (const v of recentViews as any[]) {
+        if (v.category) categoryMap.set(v.category, (categoryMap.get(v.category) || 0) + Number(v.view_count || 1));
+      }
+      for (const o of executedOrders) {
+        for (const item of o.items || []) {
+          const cat = item?.product?.category;
+          if (cat) categoryMap.set(cat, (categoryMap.get(cat) || 0) + 2);
+        }
+      }
+      const topCategories = Array.from(categoryMap.entries())
+        .map(([category, score]) => ({ category, score }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5);
+
+      const timestamps = [
+        u.last_seen_at,
+        u.updated_at,
+        recentActions[0]?.created_at,
+        recentViews[0]?.viewed_at,
+        carts[0]?.last_updated_at,
+        orders[0]?.created_at
+      ]
+        .filter(Boolean)
+        .map(t => new Date(t).getTime())
+        .filter(n => Number.isFinite(n));
+      const lastActivityAt = timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : u.created_at;
+
+      return {
+        success: true,
+        user: {
+          ...u,
+          last_activity_at: lastActivityAt
+        },
+        recentViews: (recentViews as any[]).map(v => ({
+          product_id: v.product_id,
+          name_ar: v.name_ar,
+          handle: v.handle,
+          category: v.category,
+          price: Number(v.price || 0),
+          image: Array.isArray(v.images) && v.images[0] ? v.images[0] : '/qamar-images/placeholder.svg',
+          viewed_at: v.viewed_at,
+          view_count: Number(v.view_count || 1)
+        })),
+        recentActions,
+        activeCarts: carts,
+        orders,
+        reviews,
+        topCategories,
+        stats: {
+          total_orders: orders.length,
+          executed_orders: executedOrders.length,
+          delivered_orders: deliveredOrders.length,
+          cancelled_orders: cancelledOrders.length,
+          total_spent: totalSpent,
+          views_count: recentViews.length
+        }
+      };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'تعذر تحميل تحليلات الحساب.' };
+    }
   },
 
   async updateUserProfile(userId: string, data: any) {

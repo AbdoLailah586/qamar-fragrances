@@ -20,6 +20,7 @@ const policies: Record<string, string[]> = {
   bulkInsertProducts: ['products'],
   deleteProduct: ['products'],
   getAllUsers: ['users'],
+  getUserInsights: ['users'],
   getActiveCarts: ['crm'],
   updateOrderState: ['orders'],
   getOilReserves: ['oils', 'inventory', 'products'],
@@ -240,7 +241,52 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
     return store.updateStoreSettings(merged);
   }
 
-  if (method === 'getAllUsers') return (await store.getAllUsers()).map(publicUser);
+  if (method === 'getAllUsers') {
+    const rows = await store.getAllUsers();
+    return rows.map((u: any) => ({
+      ...publicUser(u),
+      last_seen_at: u.last_seen_at || null,
+      last_activity_at: u.last_activity_at || u.last_seen_at || u.updated_at || u.created_at,
+      orders_count: Number(u.orders_count || 0),
+      completed_orders_count: Number(u.completed_orders_count || 0),
+      total_spent: Number(u.total_spent || 0),
+      cart_items_count: Number(u.cart_items_count || 0),
+      cart_subtotal: Number(u.cart_subtotal || 0),
+      views_count: Number(u.views_count || 0)
+    }));
+  }
+
+  if (method === 'getUserInsights') {
+    const userId = String(args[0] || '').trim();
+    if (!userId) throw fail(400, 'معرف الحساب مطلوب.');
+    return store.getUserInsights(userId);
+  }
+
+  if (method === 'adminCreateUser') {
+    if (!isFullAdmin(user)) throw forbidden();
+    const input = args[0] || {};
+    const name = String(input.name || '').trim().slice(0, 150);
+    const cleanEmail = String(input.email || '').trim().toLowerCase();
+    const phone = normalizePhone(String(input.phone || ''));
+    const password = String(input.password || '');
+    const role = input.role === 'admin' ? 'admin' : 'customer';
+    const permissions = role === 'admin' ? [] : normalizePermissions(input.permissions);
+    if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail) || password.length < 6 || password.length > 512) {
+      throw fail(400, 'أدخل الاسم وبريد إلكتروني صحيح وكلمة مرور لا تقل عن 6 أحرف.');
+    }
+    const existing = await sql`SELECT id FROM users WHERE lower(email)=${cleanEmail} LIMIT 1`;
+    if (existing.length) throw fail(409, 'هذا البريد الإلكتروني مسجل بالفعل.');
+    const newId = `usr-${Date.now()}-${randomBytes(4).toString('hex')}`;
+    const rows = await sql`
+      INSERT INTO users (id, name, email, phone, password_hash, role, admin_permissions, provider, email_verified)
+      VALUES (${newId}, ${name}, ${cleanEmail}, ${phone}, ${passwordHash(password)}, ${role}, ${JSON.stringify(permissions)}::jsonb, 'email', true)
+      RETURNING id, name, email, phone, avatar, role, provider, email_verified, addresses, created_at, updated_at, admin_permissions
+    `;
+    if (!deps) {
+      await logAudit({ actorId: user.id, actorName: user.name, action: 'USER_CREATED', entity: 'user', entityId: newId, after: { email: cleanEmail, role, permissions } });
+    }
+    return { success: true, user: publicUser(rows[0]) };
+  }
 
   if (method === 'logWishlistEvent') {
     if (!user) throw forbidden();
@@ -322,10 +368,12 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
 
   if (method === 'deleteUser') {
     if (!user || (!isFullAdmin(user) && user.id !== args[0])) throw forbidden();
-    const rows = await sql`DELETE FROM users WHERE id=${args[0]} AND lower(email)<>${OWNER_EMAIL} RETURNING id`;
+    const rows = await sql`DELETE FROM users WHERE id=${args[0]} AND lower(email)<>${OWNER_EMAIL} RETURNING id, email, name`;
     if (!rows.length) return { success: false, error: 'لا يمكن حذف حساب المالك المحمي أو الحساب غير موجود.' };
     if (user.id === args[0]) {
       await endSession(req, res, sql).catch(() => {});
+    } else if (!deps) {
+      await logAudit({ actorId: user.id, actorName: user.name, action: 'USER_DELETED', entity: 'user', entityId: args[0], before: { email: rows[0]?.email, name: rows[0]?.name } });
     }
     return { success: true };
   }

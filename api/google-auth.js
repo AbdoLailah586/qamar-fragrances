@@ -31,7 +31,7 @@ export default async function handler(req, res, deps) {
         avatar = COALESCE(NULLIF(EXCLUDED.avatar, ''), users.avatar),
         email_verified = true,
         updated_at = NOW()
-      RETURNING id, name, email, phone, avatar, role, provider, email_verified, addresses, created_at, admin_permissions, totp_enabled;
+      RETURNING id, name, email, phone, avatar, role, provider, email_verified, addresses, created_at, updated_at, admin_permissions, totp_enabled;
     `;
     const user = userRows[0];
     const startSession = deps?.issueSession || issueSession;

@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Users, Shield, Settings, MessageCircle, Mail, KeyRound,
+  Shield, Settings, MessageCircle, Mail, KeyRound,
   Send, CheckCircle2, AlertCircle, RefreshCw, ExternalLink, PlugZap
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { useAuth } from '../../context/AuthContext';
 import { neonDb } from '../../services/neonDb';
 import { whatsappUrl } from '../../utils/whatsappService';
-import { ADMIN_SECTIONS } from '../../../lib/access.js';
+import { UsersCrmPanel } from './UsersCrmPanel';
 import type { WhatsAppNotificationLog, WhatsAppTemplates } from '../../types';
 
 const TEMPLATE_LABELS: { key: keyof WhatsAppTemplates; title: string; desc: string }[] = [
@@ -23,7 +23,6 @@ const TEMPLATE_LABELS: { key: keyof WhatsAppTemplates; title: string; desc: stri
 export const SystemAdminPanel: React.FC<{ section: 'users' | 'security' | 'settings' | 'whatsapp' | 'emails' }> = ({ section }) => {
   const { settings, updateSettings } = useStore();
   const { user } = useAuth();
-  const [users, setUsers] = useState<any[]>([]);
   const [logs, setLogs] = useState<any[]>([]);
   const [totpSecret, setTotpSecret] = useState('');
   const [totpCode, setTotpCode] = useState('');
@@ -65,51 +64,13 @@ export const SystemAdminPanel: React.FC<{ section: 'users' | 'security' | 'setti
   };
 
   useEffect(() => {
-    if (section === 'users') neonDb.getAllUsers().then(setUsers).catch(() => {});
     if (section === 'security') neonDb.getAuditLog(100).then(setLogs).catch(() => {});
     if (section === 'settings') setFormSettings(settings);
     if (section === 'whatsapp') void loadWhatsAppData();
   }, [section, settings]);
 
   if (section === 'users') {
-    return (
-      <div className="space-y-5">
-        <h1 className="text-xl font-extrabold text-[#252a31] flex items-center gap-2"><Users className="w-5 h-5 text-[#fe9931]" /><span>المستخدمون وصلاحيات الفريق ({users.length})</span></h1>
-        {msg && <p className="text-xs font-bold text-[#fe9931]">{msg}</p>}
-        <div className="space-y-3">
-          {users.map(u => (
-            <div key={u.id} className="bg-white border rounded-2xl p-4 space-y-3 text-xs">
-              <div className="flex flex-wrap justify-between items-center gap-2">
-                <div><p className="font-bold text-sm">{u.name}</p><p className="text-gray-500">{u.email} • {u.role}</p></div>
-                <select value={u.role} onChange={async e => {
-                  const res = await neonDb.updateUserAccess(u.id, { role: e.target.value as any, permissions: u.admin_permissions || [] });
-                  if (res.success) { setMsg('تم تحديث الصلاحية'); setUsers(await neonDb.getAllUsers()); }
-                }} className="px-3 py-1.5 border rounded-xl bg-white">
-                  <option value="customer">Customer / Limited Staff</option>
-                  <option value="admin">Full Admin</option>
-                </select>
-              </div>
-              {u.role !== 'admin' && (
-                <div className="flex flex-wrap gap-1.5">
-                  {ADMIN_SECTIONS.map(sec => {
-                    const has = (u.admin_permissions || []).includes(sec);
-                    return (
-                      <button key={sec} type="button" onClick={async () => {
-                        const next = has ? (u.admin_permissions || []).filter((s: string) => s !== sec) : [...(u.admin_permissions || []), sec];
-                        await neonDb.updateUserAccess(u.id, { role: 'customer', permissions: next });
-                        setUsers(await neonDb.getAllUsers());
-                      }} className={`px-2.5 py-1 rounded-full border ${has ? 'bg-[#fe9931] text-white border-[#fe9931]' : 'bg-gray-50 text-gray-600'}`}>
-                        {sec}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-    );
+    return <UsersCrmPanel />;
   }
 
   if (section === 'security') {

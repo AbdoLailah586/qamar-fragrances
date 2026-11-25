@@ -59,6 +59,10 @@ export const neonDb = {
     return callStore('updateUserAccess', [userId, access]);
   },
   async getAllUsers() { return callStore('getAllUsers'); },
+  async getUserInsights(userId: string) { return callAction('getUserInsights', [userId]); },
+  async adminCreateUser(data: { name: string; email: string; phone?: string; password: string; role: 'admin' | 'customer'; permissions?: string[] }) {
+    return callAction('adminCreateUser', [data]);
+  },
   async deleteUser(userId: string) { return callAction('deleteUser', [userId]); },
   async updateUserProfile(userId: string, data: any) { return callAction('updateUserProfile', [userId, data]); },
   async updateUserEmail(userId: string, newEmail: string) { return callAction('updateUserEmail', [userId, newEmail]); },

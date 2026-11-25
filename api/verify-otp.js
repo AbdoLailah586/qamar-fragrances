@@ -38,7 +38,7 @@ export default async function handler(req, res) {
         password_hash = COALESCE(NULLIF(EXCLUDED.password_hash, ''), users.password_hash),
         email_verified = true,
         updated_at = NOW()
-      RETURNING id, name, email, phone, role, provider, email_verified, addresses, created_at, admin_permissions, totp_enabled;
+      RETURNING id, name, email, phone, role, provider, email_verified, addresses, created_at, updated_at, admin_permissions, totp_enabled;
     `;
     const user = userRows[0];
     await issueSession(req, res, user.id, sql, !user.totp_enabled);

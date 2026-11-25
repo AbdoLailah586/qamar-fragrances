@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
   totp_secret VARCHAR(64),
   totp_enabled BOOLEAN NOT NULL DEFAULT false,
   totp_pending_secret VARCHAR(64),
+  last_seen_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -115,6 +116,8 @@ CREATE INDEX IF NOT EXISTS orders_phone_idx ON orders(customer_phone);
 
 CREATE TABLE IF NOT EXISTS active_carts (
   session_id VARCHAR(120) PRIMARY KEY,
+  customer_id VARCHAR(100),
+  customer_email VARCHAR(255),
   customer_name VARCHAR(200),
   customer_phone VARCHAR(40),
   items JSONB NOT NULL DEFAULT '[]'::jsonb,

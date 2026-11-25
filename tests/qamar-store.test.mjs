@@ -699,3 +699,144 @@ describe('Checkout GPS & Manual Map Location Picker', () => {
     assert.match(adminOrdersSrc, /google_maps_url/);
   });
 });
+
+describe('Admin Users CRM, Insights & Legal Policy Pages', () => {
+  test('adminCreateUser enforces Full Admin RBAC, hashes passwords, and strips secrets', async () => {
+    const insertedRows = [];
+    const mockSql = async (strings, ...vals) => {
+      const q = strings.join('?');
+      if (q.includes('SELECT id FROM users WHERE lower(email)')) {
+        return vals[0] === 'existing@qamar.com' ? [{ id: 'usr-old' }] : [];
+      }
+      if (q.includes('INSERT INTO users')) {
+        const row = {
+          id: vals[0],
+          name: vals[1],
+          email: vals[2],
+          phone: vals[3],
+          password_hash: vals[4],
+          role: vals[5],
+          admin_permissions: JSON.parse(vals[6] || '[]'),
+          provider: 'email',
+          email_verified: true,
+          addresses: [],
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        insertedRows.push(row);
+        return [row];
+      }
+      return [];
+    };
+
+    const staffOnly = { id: 'usr-staff', email: 'staff@qamar.com', role: 'customer', admin_permissions: ['users'] };
+    const reqDenied = createMockReq({
+      method: 'POST',
+      headers: { origin: 'https://qamar-fragrances.com' },
+      body: { method: 'adminCreateUser', args: [{ name: 'موظف', email: 'new@qamar.com', password: 'Password123', role: 'customer', permissions: ['orders'] }] }
+    });
+    const resDenied = createMockRes();
+    await storeApi.default(reqDenied, resDenied, { sql: mockSql, store: {}, user: staffOnly });
+    assert.equal(resDenied.statusCode, 403);
+
+    const admin = { id: 'usr-owner', email: 'qamaraboalnaga@gmail.com', role: 'admin', admin_permissions: [] };
+    const reqOk = createMockReq({
+      method: 'POST',
+      headers: { origin: 'https://qamar-fragrances.com' },
+      body: { method: 'adminCreateUser', args: [{ name: 'أحمد مبيعات', email: 'Ahmed@Qamar.com', phone: '01012345678', password: 'Password123', role: 'customer', permissions: ['orders', 'crm'] }] }
+    });
+    const resOk = createMockRes();
+    await storeApi.default(reqOk, resOk, { sql: mockSql, store: {}, user: admin });
+    assert.equal(resOk.statusCode, 200);
+    assert.equal(resOk.body.result.success, true);
+    assert.equal(resOk.body.result.user.email, 'ahmed@qamar.com');
+    assert.equal(resOk.body.result.user.password_hash, undefined);
+    assert.deepEqual(resOk.body.result.user.admin_permissions, ['orders', 'crm']);
+    assert.match(insertedRows[0].password_hash, /^scrypt\$/);
+
+    const reqDup = createMockReq({
+      method: 'POST',
+      headers: { origin: 'https://qamar-fragrances.com' },
+      body: { method: 'adminCreateUser', args: [{ name: 'مكرر', email: 'existing@qamar.com', password: 'Password123', role: 'customer' }] }
+    });
+    const resDup = createMockRes();
+    await storeApi.default(reqDup, resDup, { sql: mockSql, store: {}, user: admin });
+    assert.equal(resDup.statusCode, 409);
+  });
+
+  test('getAllUsers and getUserInsights require users section and preserve CRM telemetry', async () => {
+    const customer = { id: 'usr-1', email: 'c@qamar.com', role: 'customer', admin_permissions: [] };
+    const staffWithUsers = { id: 'usr-2', email: 'u@qamar.com', role: 'customer', admin_permissions: ['users'] };
+    const fakeStore = {
+      async getAllUsers() {
+        return [{
+          id: 'usr-9',
+          name: 'سارة',
+          email: 'sara@example.com',
+          phone: '01001112223',
+          role: 'customer',
+          provider: 'google',
+          email_verified: true,
+          created_at: '2026-11-20T10:00:00Z',
+          last_seen_at: '2026-11-25T14:00:00Z',
+          last_activity_at: '2026-11-25T14:05:00Z',
+          orders_count: 3,
+          completed_orders_count: 2,
+          total_spent: 1850,
+          cart_items_count: 2,
+          cart_subtotal: 700,
+          views_count: 15,
+          password_hash: 'secret-should-strip'
+        }];
+      },
+      async getUserInsights(id) {
+        return { success: true, user: { id }, recentViews: [{ product_id: 'p1', view_count: 2 }], activeCarts: [{ items: [{}], subtotal: 400 }], orders: [] };
+      }
+    };
+
+    const res403 = createMockRes();
+    await storeApi.default(createMockReq({ method: 'POST', headers: { origin: 'https://qamar-fragrances.com' }, body: { method: 'getUserInsights', args: ['usr-9'] } }), res403, { sql: async () => [], store: fakeStore, user: customer });
+    assert.equal(res403.statusCode, 403);
+
+    const resList = createMockRes();
+    await storeApi.default(createMockReq({ method: 'POST', headers: { origin: 'https://qamar-fragrances.com' }, body: { method: 'getAllUsers', args: [] } }), resList, { sql: async () => [], store: fakeStore, user: staffWithUsers });
+    assert.equal(resList.statusCode, 200);
+    assert.equal(resList.body.result[0].views_count, 15);
+    assert.equal(resList.body.result[0].cart_items_count, 2);
+    assert.equal(resList.body.result[0].completed_orders_count, 2);
+    assert.equal(resList.body.result[0].password_hash, undefined);
+
+    const resIns = createMockRes();
+    await storeApi.default(createMockReq({ method: 'POST', headers: { origin: 'https://qamar-fragrances.com' }, body: { method: 'getUserInsights', args: ['usr-9'] } }), resIns, { sql: async () => [], store: fakeStore, user: staffWithUsers });
+    assert.equal(resIns.statusCode, 200);
+    assert.equal(resIns.body.result.recentViews.length, 1);
+  });
+
+  test('UsersCrmPanel, PolicyPage, Footer, and StoreContext expose full user CRM and policy routes', () => {
+    const crmSrc = readFileSync(resolve(ROOT, 'src/pages/admin/UsersCrmPanel.tsx'), 'utf8');
+    const policySrc = readFileSync(resolve(ROOT, 'src/pages/PolicyPage.tsx'), 'utf8');
+    const footerSrc = readFileSync(resolve(ROOT, 'src/components/Footer.tsx'), 'utf8');
+    const ctxSrc = readFileSync(resolve(ROOT, 'src/context/StoreContext.tsx'), 'utf8');
+    const appSrc = readFileSync(resolve(ROOT, 'src/App.tsx'), 'utf8');
+
+    assert.match(crmSrc, /إضافة حساب جديد/);
+    assert.match(crmSrc, /حذف الحساب/);
+    assert.match(crmSrc, /آخر 15 منتج زارهم/);
+    assert.match(crmSrc, /في السلة الآن/);
+    assert.match(crmSrc, /الأوردرات المنفذة/);
+    assert.match(crmSrc, /آخر ترافيك/);
+
+    assert.match(policySrc, /شروط وأحكام استخدام المتجر/);
+    assert.match(policySrc, /سياسة الخصوصية وحماية البيانات/);
+    assert.match(policySrc, /سياسة الاستبدال والاسترجاع/);
+    assert.match(policySrc, /سياسة الشحن والتوصيل/);
+    assert.match(footerSrc, /navigate\('terms'\)/);
+    assert.match(footerSrc, /navigate\('privacy'\)/);
+    assert.match(footerSrc, /navigate\('refund'\)/);
+    assert.match(footerSrc, /navigate\('shipping'\)/);
+    assert.match(ctxSrc, /\/ar\/privacy-policy/);
+    assert.match(ctxSrc, /\/ar\/return-policy/);
+    assert.match(ctxSrc, /\/ar\/shipping-policy/);
+    assert.match(appSrc, /PolicyPage/);
+  });
+});

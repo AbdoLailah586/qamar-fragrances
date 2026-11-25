@@ -15,7 +15,11 @@ export type AppTab =
   | 'order-success'
   | 'track-order'
   | 'profile'
-  | 'admin';
+  | 'admin'
+  | 'terms'
+  | 'privacy'
+  | 'refund'
+  | 'shipping';
 
 const defaultSettings: StoreSettings = {
   store_name: 'Qamar Fragrances',
@@ -88,6 +92,10 @@ function parseUrlRoute(): RouteState {
   if (pathname === '/order-success') return { tab: 'order-success', category: 'all', search: '' };
   if (pathname === '/track-order' || pathname === '/tracking') return { tab: 'track-order', category: 'all', search: '' };
   if (pathname === '/profile' || pathname === '/account') return { tab: 'profile', category: 'all', search: '' };
+  if (pathname === '/terms' || pathname === '/terms-of-use' || pathname === '/policies') return { tab: 'terms', category: 'all', search: '' };
+  if (pathname === '/privacy' || pathname === '/privacy-policy') return { tab: 'privacy', category: 'all', search: '' };
+  if (pathname === '/refund' || pathname === '/return-policy' || pathname === '/returns') return { tab: 'refund', category: 'all', search: '' };
+  if (pathname === '/shipping' || pathname === '/shipping-policy') return { tab: 'shipping', category: 'all', search: '' };
   if (pathname === '/admin') return { tab: 'admin', category: 'all', search: '' };
 
   return { tab: 'home', category: 'all', search: '' };
@@ -268,13 +276,58 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (match) setSelectedProduct(match);
   }, [pendingHandle, products]);
 
+  const lastTrackedProductIdRef = React.useRef<string>('');
+  useEffect(() => {
+    if (currentTab !== 'product' || !selectedProduct?.id || !deviceIsOnline()) return;
+    if (lastTrackedProductIdRef.current === selectedProduct.id) return;
+    lastTrackedProductIdRef.current = selectedProduct.id;
+    neonDb
+      .trackActivity({
+        sessionId,
+        customerId: account?.id,
+        actionType: 'view_product',
+        targetId: selectedProduct.id,
+        metadata: {
+          category: selectedProduct.category,
+          name_ar: selectedProduct.name_ar,
+          handle: selectedProduct.handle,
+          price: selectedProduct.price,
+          image: selectedProduct.images?.[0]
+        }
+      })
+      .catch(() => {});
+  }, [currentTab, selectedProduct?.id, sessionId, account?.id]);
+
   // Persist cart & sync active cart
   useEffect(() => {
     writeStoredJson('qamar_cart', cart);
     if (!deviceIsOnline()) return;
     const sub = cart.reduce((s, i) => s + i.unitPrice * i.quantity, 0);
-    neonDb.syncActiveCart({ sessionId, customerName: account?.name, customerPhone: account?.phone, items: cart, subtotal: sub }).catch(() => {});
-  }, [cart, sessionId, account?.name, account?.phone]);
+    neonDb
+      .syncActiveCart({
+        sessionId,
+        customerId: account?.id,
+        customerEmail: account?.email,
+        customerName: account?.name,
+        customerPhone: account?.phone,
+        items: cart,
+        subtotal: sub
+      })
+      .catch(() => {});
+  }, [cart, sessionId, account?.id, account?.email, account?.name, account?.phone]);
+
+  // Link anonymous session activity and refresh user last_seen_at on auth state ready
+  useEffect(() => {
+    if (!sessionReady || !account?.id || !deviceIsOnline()) return;
+    neonDb
+      .trackActivity({
+        sessionId,
+        customerId: account.id,
+        actionType: 'session_ping',
+        targetId: typeof window !== 'undefined' ? window.location.pathname : '/ar'
+      })
+      .catch(() => {});
+  }, [sessionReady, account?.id, sessionId]);
 
   useEffect(() => { writeStoredJson('qamar_wishlist', wishlist); }, [wishlist]);
 
@@ -310,6 +363,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     else if (tab === 'order-success') nextPath = '/ar/order-success';
     else if (tab === 'track-order') nextPath = '/ar/track-order';
     else if (tab === 'profile') nextPath = '/ar/profile';
+    else if (tab === 'terms') nextPath = '/ar/terms';
+    else if (tab === 'privacy') nextPath = '/ar/privacy-policy';
+    else if (tab === 'refund') nextPath = '/ar/return-policy';
+    else if (tab === 'shipping') nextPath = '/ar/shipping-policy';
     else if (tab === 'admin') nextPath = '/ar/admin';
 
     if (typeof window !== 'undefined' && window.location.pathname + window.location.search !== nextPath) {
@@ -319,7 +376,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const openProduct = (product: Product) => {
-    neonDb.trackActivity({ sessionId, customerId: account?.id, actionType: 'view_product', targetId: product.id, metadata: { category: product.category } }).catch(() => {});
     navigate('product', { product });
   };
 

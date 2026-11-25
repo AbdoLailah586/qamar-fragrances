@@ -16,6 +16,7 @@ import { Checkout } from './pages/Checkout';
 import { OrderSuccess } from './pages/OrderSuccess';
 import { OrderTracking } from './pages/OrderTracking';
 import { Profile } from './pages/Profile';
+import { PolicyPage } from './pages/PolicyPage';
 
 // Lazy-load the Admin ERP so customer storefront bundles remain lightweight and fast
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
@@ -54,6 +55,9 @@ const StorefrontRouter: React.FC = () => {
         {currentTab === 'order-success' && <OrderSuccess />}
         {currentTab === 'track-order' && <OrderTracking />}
         {currentTab === 'profile' && <Profile />}
+        {(currentTab === 'terms' || currentTab === 'privacy' || currentTab === 'refund' || currentTab === 'shipping') && (
+          <PolicyPage activePolicy={currentTab} />
+        )}
       </div>
       <Footer />
       <MobileBottomNav />
