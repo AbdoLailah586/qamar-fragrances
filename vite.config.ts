@@ -7,6 +7,9 @@ import verifyOtpHandler from './api/verify-otp.js';
 import googleAuthHandler from './api/google-auth.js';
 import healthHandler from './api/health.js';
 import storeHandler from './api/store';
+import ogProductHandler from './api/og-product.js';
+import metaFeedHandler from './api/meta-feed.js';
+import sitemapHandler from './api/sitemap.js';
 
 const envPath = resolve(process.cwd(), '.env');
 if (existsSync(envPath)) {
@@ -38,6 +41,8 @@ function devApiPlugin(): Plugin {
           let body = {};
           if (raw) { try { body = JSON.parse(raw); } catch { body = {}; } }
           (req as any).body = body;
+          const reqUrlObj = new URL(req.url || '/', 'http://localhost');
+          (req as any).query = Object.fromEntries(reqUrlObj.searchParams.entries());
           const mockRes = {
             statusCode: 200,
             setHeader: (k: string, v: string) => res.setHeader(k, v),
@@ -47,6 +52,10 @@ function devApiPlugin(): Plugin {
               res.setHeader('Content-Type', 'application/json');
               res.end(JSON.stringify(data));
             },
+            send(data: any) {
+              res.statusCode = this.statusCode;
+              res.end(typeof data === 'string' ? data : JSON.stringify(data));
+            },
             end: () => res.end()
           };
           try {
@@ -55,6 +64,9 @@ function devApiPlugin(): Plugin {
             else if (url === '/api/google-auth') await googleAuthHandler(req, mockRes);
             else if (url === '/api/health') await healthHandler(req, mockRes);
             else if (url === '/api/store') await storeHandler(req, mockRes);
+            else if (url === '/api/og-product') await ogProductHandler(req, mockRes);
+            else if (url === '/api/meta-feed') await metaFeedHandler(req, mockRes);
+            else if (url === '/api/sitemap') await sitemapHandler(req, mockRes);
             else next();
           } catch (err: any) {
             mockRes.status(500).json({ success: false, error: err.message });

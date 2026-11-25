@@ -194,6 +194,8 @@ export interface StoreSettings {
   auto_send_on_status_change?: boolean;
   auto_alert_admin_on_order?: boolean;
   admin_alert_whatsapp_number?: string;
+  meta_pixel_id?: string;
+  meta_pixel_enabled?: boolean;
   whatsapp_templates?: WhatsAppTemplates;
   whatsapp_automation_url?: string;
   whatsapp_automation_email?: string;

@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { Sparkles, Boxes, Download, Upload, Star, Eye, EyeOff, Copy, Trash2, Edit3, Plus, Check, X } from 'lucide-react';
+import { Sparkles, Boxes, Download, Upload, Star, Eye, EyeOff, Copy, Trash2, Edit3, Plus, Check, X, Link2 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { neonDb } from '../../services/neonDb';
 import { formatEGP } from '../../utils/arabicNumbers';
+import { buildProductAdUrl } from '../../utils/adLinks';
 import type { Product } from '../../types';
 
 function safeCsvCell(val: unknown): string {
@@ -279,6 +280,19 @@ export const InventoryAndCatalogPanel: React.FC<{ section: 'products' | 'invento
                   <td className="p-3 font-bold">{p.stock}</td>
                   <td className="p-3">
                     <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        data-testid={`btn-copy-ad-${p.id}`}
+                        onClick={async () => {
+                          const url = buildProductAdUrl({ handle: p.handle, source: 'facebook', medium: 'cpc' });
+                          try { await navigator.clipboard.writeText(url); } catch {}
+                          setMsg(`تم نسخ رابط إعلان فيسبوك المشفّر لعطر "${p.name_ar}" جاهزاً للـ Carousel!`);
+                        }}
+                        className="px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-600 text-blue-700 hover:text-white text-[10px] font-bold flex items-center gap-1 transition-colors"
+                        title="نسخ رابط مشفّر جاهز لإعلان فيسبوك/إنستجرام"
+                      >
+                        <Link2 className="w-3 h-3" /> رابط إعلان
+                      </button>
                       <button type="button" onClick={() => setEditing(p)} className="p-1.5 rounded-lg hover:bg-gray-100" title="تعديل"><Edit3 className="w-3.5 h-3.5" /></button>
                       <button type="button" onClick={() => toggleProductVisibility(p.id, !p.is_active)} className="p-1.5 rounded-lg hover:bg-gray-100" title="إظهار/إخفاء">
                         {p.is_active ? <Eye className="w-3.5 h-3.5 text-green-600" /> : <EyeOff className="w-3.5 h-3.5 text-gray-400" />}

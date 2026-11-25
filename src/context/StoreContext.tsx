@@ -6,6 +6,7 @@ import { deviceIsOnline, readOfflineCatalog, saveOfflineCatalog } from '../servi
 import { readStorage, writeStorage, readStoredArray, readStoredJson, writeStoredJson } from '../utils/browserStorage';
 import { getOrCaptureVisitorAttribution, type VisitorAttribution } from '../utils/visitorAttribution';
 import { applyPageSeo, buildStoreJsonLd } from '../utils/seo';
+import { initMetaPixel, normalizeMetaPixelId, trackMetaEvent } from '../utils/metaPixel';
 
 export type AppTab =
   | 'home'
@@ -72,7 +73,11 @@ interface RouteState {
 
 function parseUrlRoute(): RouteState {
   if (typeof window === 'undefined') return { tab: 'home', category: 'all', search: '' };
-  let pathname = decodeURIComponent(window.location.pathname).replace(/^\/(ar|en)(?=\/|$)/, '') || '/';
+  let rawPath = window.location.pathname;
+  try {
+    rawPath = decodeURIComponent(window.location.pathname);
+  } catch {}
+  let pathname = rawPath.replace(/^\/(ar|en)(?=\/|$)/, '') || '/';
   if (pathname !== '/' && pathname.endsWith('/')) pathname = pathname.slice(0, -1);
   const sp = new URLSearchParams(window.location.search);
 
@@ -313,7 +318,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       })
       .catch(() => {});
-  }, [currentTab, selectedProduct?.id, sessionId, account?.id, account?.name, account?.phone, account?.email, visitorAttribution]);
+    trackMetaEvent('ViewContent', {
+      content_ids: [selectedProduct.id],
+      content_name: selectedProduct.name_ar,
+      content_type: 'product',
+      value: Number(selectedProduct.price || 0),
+      currency: 'EGP'
+    });
+  }, [currentTab, selectedProduct?.id, selectedProduct?.name_ar, selectedProduct?.price, selectedProduct?.category, selectedProduct?.handle, selectedProduct?.images, sessionId, account?.id, account?.name, account?.phone, account?.email, visitorAttribution]);
 
   // Persist cart & sync active cart
   useEffect(() => {
@@ -394,6 +406,23 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   }, [currentTab, selectedCategory, settings]);
 
+  // Initialize Meta Pixel (numeric ID only, no Access Token required) & track PageView / InitiateCheckout
+  const activePixelId = settings.meta_pixel_enabled !== false ? normalizeMetaPixelId(settings.meta_pixel_id) : '';
+  useEffect(() => {
+    if (!activePixelId || currentTab === 'admin') return;
+    if (initMetaPixel(activePixelId)) {
+      trackMetaEvent('PageView');
+      if (currentTab === 'checkout' && cart.length > 0) {
+        trackMetaEvent('InitiateCheckout', {
+          content_ids: cart.map(c => c.product.id),
+          num_items: cart.reduce((s, c) => s + c.quantity, 0),
+          value: cart.reduce((s, c) => s + c.unitPrice * c.quantity, 0),
+          currency: 'EGP'
+        });
+      }
+    }
+  }, [activePixelId, currentTab, selectedProduct?.id, selectedCategory]);
+
   useEffect(() => { writeStoredJson('qamar_wishlist', wishlist); }, [wishlist]);
 
   const navigate = (tab: AppTab, options?: { category?: string; search?: string; product?: Product; productHandle?: string }) => {
@@ -461,6 +490,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
     setIsCartOpen(true);
     neonDb.trackActivity({ sessionId, customerId: account?.id, actionType: 'add_to_cart', targetId: product.id, metadata: { size } }).catch(() => {});
+    trackMetaEvent('AddToCart', {
+      content_ids: [product.id],
+      content_name: product.name_ar,
+      content_type: 'product',
+      value: unitPrice * quantity,
+      currency: 'EGP'
+    });
   };
 
   const buyNow = (product: Product, quantity = 1, variant?: ProductVariant | null) => {
@@ -476,6 +512,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return next;
       }
       return [...prev, { product, quantity, selectedSize: size, variantId, unitPrice }];
+    });
+    trackMetaEvent('AddToCart', {
+      content_ids: [product.id],
+      content_name: product.name_ar,
+      content_type: 'product',
+      value: unitPrice * quantity,
+      currency: 'EGP'
     });
     setIsCartOpen(false);
     navigate('checkout');
@@ -513,6 +556,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
     const ok = await neonDb.createOrder(order);
     if (!ok) throw new Error('تعذر تأكيد الطلب. تحقق من توفر الكميات والأسعار الحالية.');
+    trackMetaEvent('Purchase', {
+      content_ids: order.items.map(i => i.product.id),
+      num_items: order.items.reduce((s, i) => s + i.quantity, 0),
+      value: Number(order.total || 0),
+      currency: 'EGP',
+      order_id: order.order_number
+    });
     setCurrentOrder(order);
     setOrders(prev => [order, ...prev]);
     clearCart();

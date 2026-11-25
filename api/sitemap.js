@@ -17,7 +17,7 @@ function toFullUrl(baseUrl, pathOrUrl) {
 
 export default async function handler(req, res) {
   const host = req.headers['x-forwarded-host'] || req.headers['host'] || 'qamar-fragrances.com';
-  const proto = req.headers['x-forwarded-proto'] || 'https';
+  const proto = req.headers['x-forwarded-proto'] || (/^(localhost|127\.0\.0\.1)(:|$)/i.test(host) ? 'http' : 'https');
   const baseUrl = `${proto}://${host}`;
 
   let products = [];

@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ChevronRight, ChevronLeft, Plus, Minus, ShoppingCart, Star, Heart } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Plus, Minus, ShoppingCart, Star, Heart, Share2, Check } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { neonDb } from '../services/neonDb';
 import { formatEGP } from '../utils/arabicNumbers';
 import { applyPageSeo, buildProductJsonLd } from '../utils/seo';
+import { buildProductAdUrl } from '../utils/adLinks';
 import { ProductCard } from '../components/ProductCard';
 import type { FragranceNotesEntry } from '../types';
 
@@ -37,6 +38,7 @@ export const ProductDetails: React.FC = () => {
   const [revComment, setRevComment] = useState('');
   const [revRating, setRevRating] = useState(5);
   const [revMsg, setRevMsg] = useState('');
+  const [copiedLink, setCopiedLink] = useState(false);
 
   useEffect(() => {
     setActiveImgIdx(0);
@@ -198,16 +200,33 @@ export const ProductDetails: React.FC = () => {
                 {product.name_ar}
               </h1>
             </div>
-            <button
-              type="button"
-              onClick={() => toggleWishlist(product.id)}
-              className={`p-2.5 rounded-full border transition shrink-0 ${
-                fav ? 'border-[#fe9931] text-[#fe9931] bg-[#fe9931]/10' : 'border-gray-200 text-gray-500 hover:border-[#fe9931]'
-              }`}
-              aria-label="إضافة للمفضلة"
-            >
-              <Heart className={`w-5 h-5 ${fav ? 'fill-current' : ''}`} />
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                data-testid="btn-copy-product-link"
+                onClick={async () => {
+                  const link = buildProductAdUrl({ handle: product.handle });
+                  try { await navigator.clipboard.writeText(link); } catch {}
+                  setCopiedLink(true);
+                  window.setTimeout(() => setCopiedLink(false), 2000);
+                }}
+                className="p-2.5 rounded-full border border-gray-200 text-gray-500 hover:border-[#fe9931] hover:text-[#fe9931] transition shrink-0 flex items-center gap-1"
+                title="نسخ رابط المنتج المشفّر للمشاركة أو الإعلانات"
+                aria-label="نسخ رابط المنتج"
+              >
+                {copiedLink ? <Check className="w-5 h-5 text-green-600" /> : <Share2 className="w-5 h-5" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => toggleWishlist(product.id)}
+                className={`p-2.5 rounded-full border transition shrink-0 ${
+                  fav ? 'border-[#fe9931] text-[#fe9931] bg-[#fe9931]/10' : 'border-gray-200 text-gray-500 hover:border-[#fe9931]'
+                }`}
+                aria-label="إضافة للمفضلة"
+              >
+                <Heart className={`w-5 h-5 ${fav ? 'fill-current' : ''}`} />
+              </button>
+            </div>
           </div>
 
           {/* Size Variant Pills ("الحجم") */}

@@ -43,6 +43,10 @@ const egyptLocation = await import(pathToFileURL(resolve(ROOT, 'src/utils/egyptL
 const attribution = await import(pathToFileURL(resolve(ROOT, 'src/utils/visitorAttribution.ts')).href);
 const seo = await import(pathToFileURL(resolve(ROOT, 'src/utils/seo.ts')).href);
 const sitemapApi = await import(pathToFileURL(resolve(ROOT, 'api/sitemap.js')).href);
+const metaFeedApi = await import(pathToFileURL(resolve(ROOT, 'api/meta-feed.js')).href);
+const ogProductApi = await import(pathToFileURL(resolve(ROOT, 'api/og-product.js')).href);
+const adLinks = await import(pathToFileURL(resolve(ROOT, 'src/utils/adLinks.ts')).href);
+const metaPixel = await import(pathToFileURL(resolve(ROOT, 'src/utils/metaPixel.ts')).href);
 const storeApi = await import(pathToFileURL(resolve(ROOT, 'api/store.ts')).href);
 const whatsappCrm = await import(pathToFileURL(resolve(ROOT, 'server/whatsappCrm.ts')).href);
 
@@ -1034,5 +1038,95 @@ describe('Guest Tracking, Ad Attribution, SEO & Home Recently Viewed', () => {
     assert.match(homeSrc, /عطور زرتها مؤخراً/);
     assert.match(homeSrc, /home-recently-viewed/);
     assert.match(crmSrc, /الزوار بدون حساب/);
+  });
+});
+
+describe('Meta Ads Tools: Social Crawler OG, Catalog Feed CSV/XML, Pixel & Encoded Links', () => {
+  test('encodes Arabic/space product handles for Meta Carousel URLs and validates Meta Pixel IDs strictly', () => {
+    const adUrl = adLinks.buildProductAdUrl({
+      origin: 'https://qamarfragrances.com',
+      handle: 'Timber Amouage تيمبر امواج',
+      source: 'facebook',
+      medium: 'cpc',
+      campaign: 'winter_ads'
+    });
+    assert.match(adUrl, /^https:\/\/qamarfragrances\.com\/ar\/product\/all\/Timber%20Amouage/);
+    assert.doesNotMatch(adUrl, /\s/);
+    assert.match(adUrl, /utm_source=facebook/);
+    assert.match(adUrl, /utm_campaign=winter_ads/);
+
+    assert.equal(metaPixel.normalizeMetaPixelId('123456789012345'), '123456789012345');
+    assert.equal(metaPixel.normalizeMetaPixelId('  9876543210  '), '9876543210');
+    assert.equal(metaPixel.normalizeMetaPixelId('alert(1)'), '');
+    assert.equal(metaPixel.normalizeMetaPixelId('123'), '');
+  });
+
+  test('meta-feed.js generates valid Meta Commerce CSV and XML feeds with EGP prices and encoded links', async () => {
+    const sampleProducts = [{
+      id: 'Product_1',
+      handle: 'Gris Charnel BDK Parfums',
+      name_ar: 'جريس تشارنيل BDK',
+      brand: 'BDK Parfums',
+      price: 175,
+      stock_quantity: 20,
+      images: ['/qamar-images/img1.webp', '/qamar-images/img2.webp'],
+      specs: {}
+    }];
+
+    let csvOut = '';
+    await metaFeedApi.default(
+      { url: '/api/meta-feed?format=csv', headers: { host: 'qamarfragrances.com', 'x-forwarded-proto': 'https' } },
+      { setHeader() {}, status() { return this; }, send(b) { csvOut = b; return this; } },
+      { products: sampleProducts }
+    );
+    assert.match(csvOut, /id,title,description,availability,condition,price,link,image_link/);
+    assert.match(csvOut, /"175\.00 EGP"/);
+    assert.match(csvOut, /https:\/\/qamarfragrances\.com\/ar\/product\/all\/Gris%20Charnel%20BDK%20Parfums/);
+    assert.match(csvOut, /https:\/\/qamarfragrances\.com\/qamar-images\/img1\.webp/);
+
+    let xmlOut = '';
+    await metaFeedApi.default(
+      { url: '/api/meta-feed?format=xml', headers: { host: 'qamarfragrances.com', 'x-forwarded-proto': 'https' } },
+      { setHeader() {}, status() { return this; }, send(b) { xmlOut = b; return this; } },
+      { products: sampleProducts }
+    );
+    assert.match(xmlOut, /<g:id>Product_1<\/g:id>/);
+    assert.match(xmlOut, /<g:price>175\.00 EGP<\/g:price>/);
+    assert.match(xmlOut, /<g:image_link>https:\/\/qamarfragrances\.com\/qamar-images\/img1\.webp<\/g:image_link>/);
+  });
+
+  test('og-product.js and vercel.json serve product OpenGraph metadata to Facebook/Instagram/WhatsApp bots', async () => {
+    let htmlOut = '';
+    await ogProductApi.default(
+      { query: { id: 'Gris%20Charnel%20BDK%20Parfums' }, headers: { host: 'qamarfragrances.com', 'x-forwarded-proto': 'https' } },
+      { setHeader() {}, status() { return this; }, send(b) { htmlOut = b; return this; } },
+      {
+        product: {
+          id: 'Product_1',
+          handle: 'Gris Charnel BDK Parfums',
+          name_ar: 'Gris Charnel BDK Parfums',
+          brand: 'BDK Parfums',
+          price: 175,
+          stock_quantity: 10,
+          images: ['/qamar-images/img1.webp']
+        }
+      }
+    );
+    assert.match(htmlOut, /property="og:image" content="https:\/\/qamarfragrances\.com\/qamar-images\/img1\.webp"/);
+    assert.match(htmlOut, /property="product:price:amount" content="175"/);
+    assert.match(htmlOut, /property="product:price:currency" content="EGP"/);
+    assert.match(htmlOut, /application\/ld\+json/);
+
+    const vercelCfg = JSON.parse(readFileSync(resolve(ROOT, 'vercel.json'), 'utf8'));
+    const botRewrites = (vercelCfg.rewrites || []).filter(r => String(r.destination || '').includes('/api/og-product'));
+    assert.ok(botRewrites.length >= 2);
+    assert.match(botRewrites[0].has[0].value, /facebookexternalhit/);
+    assert.match(botRewrites[0].has[0].value, /WhatsApp/);
+    assert.ok(vercelCfg.rewrites.some(r => r.source === '/meta-feed.csv'));
+    assert.ok(vercelCfg.rewrites.some(r => r.source === '/meta-feed.xml'));
+
+    const marketingSrc = readFileSync(resolve(ROOT, 'src/pages/admin/MarketingAdToolsCard.tsx'), 'utf8');
+    assert.match(marketingSrc, /meta-feed\.csv/);
+    assert.match(marketingSrc, /meta_pixel_id/);
   });
 });

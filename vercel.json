@@ -5,7 +5,48 @@
       "destination": "/api/sitemap"
     },
     {
-      "source": "/((?!api/|assets/|qamar-images/|pwa/|sw\\.js$|manifest\\.webmanifest$|offline\\.html$|robots\\.txt$|sitemap\\.xml$).*)",
+      "source": "/meta-feed.csv",
+      "destination": "/api/meta-feed?format=csv"
+    },
+    {
+      "source": "/meta-feed.xml",
+      "destination": "/api/meta-feed?format=xml"
+    },
+    {
+      "source": "/ar/product/all/:id",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(facebookexternalhit|Facebot|Instagram|WhatsApp|Twitterbot|LinkedInBot|TelegramBot|Slackbot|Discordbot|Pinterest).*"
+        }
+      ],
+      "destination": "/api/og-product?id=:id"
+    },
+    {
+      "source": "/en/product/all/:id",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(facebookexternalhit|Facebot|Instagram|WhatsApp|Twitterbot|LinkedInBot|TelegramBot|Slackbot|Discordbot|Pinterest).*"
+        }
+      ],
+      "destination": "/api/og-product?id=:id"
+    },
+    {
+      "source": "/product/all/:id",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(facebookexternalhit|Facebot|Instagram|WhatsApp|Twitterbot|LinkedInBot|TelegramBot|Slackbot|Discordbot|Pinterest).*"
+        }
+      ],
+      "destination": "/api/og-product?id=:id"
+    },
+    {
+      "source": "/((?!api/|assets/|qamar-images/|pwa/|sw\\.js$|manifest\\.webmanifest$|offline\\.html$|robots\\.txt$|sitemap\\.xml$|meta-feed\\.csv$|meta-feed\\.xml$).*)",
       "destination": "/index.html"
     }
   ],
@@ -21,7 +62,7 @@
       ]
     },
     {
-      "source": "/((?!api/|assets/|qamar-images/|pwa/|sw\\.js$|manifest\\.webmanifest$|offline\\.html$|robots\\.txt$|sitemap\\.xml$).*)",
+      "source": "/((?!api/|assets/|qamar-images/|pwa/|sw\\.js$|manifest\\.webmanifest$|offline\\.html$|robots\\.txt$|sitemap\\.xml$|meta-feed\\.csv$|meta-feed\\.xml$).*)",
       "headers": [
         { "key": "Cache-Control", "value": "no-cache, max-age=0, must-revalidate" }
       ]
