@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --theme-colors-primary: #fe9931;
+  --theme-ink-normal: #4f4335;
+  --theme-ink-subdued: #585757;
+  --theme-bg: #FCFCFD;
+}
+
+html {
+  font-family: "Cairo", "Inter", "Almarai", sans-serif;
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: #ffffff;
+  color: #252a31;
+  margin: 0;
+}
+
+/* Custom scrollbar for clean drawers */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f3f4f6;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #fe9931;
+}

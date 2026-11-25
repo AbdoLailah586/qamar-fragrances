@@ -1,0 +1,15 @@
+{
+  "id": "/",
+  "name": "Qamar Fragrances | قمر للعطور",
+  "short_name": "Qamar Fragrances",
+  "description": "عطور محاكاة بجودة مطابقة للأوريجينال — قمر للعطور",
+  "start_url": "/ar",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#fe9931",
+  "icons": [
+    { "src": "/qamar-images/dcfeffa82651d149.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/qamar-images/dcfeffa82651d149.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

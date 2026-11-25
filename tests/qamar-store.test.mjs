@@ -1,0 +1,327 @@
+import { test, describe } from 'node:test';
+import assert from 'node:assert/strict';
+import { registerHooks, stripTypeScriptTypes } from 'node:module';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+// Register Node 24 TypeScript module resolver for testing TS backend/util files directly
+registerHooks({
+  resolve(specifier, context, next) {
+    if (specifier.startsWith('.') && context.parentURL?.startsWith('file:')) {
+      const base = resolve(dirname(fileURLToPath(context.parentURL)), specifier);
+      if (specifier.endsWith('.js') && !existsSync(base) && existsSync(base.replace(/\.js$/, '.ts'))) {
+        return { url: pathToFileURL(base.replace(/\.js$/, '.ts')).href, shortCircuit: true };
+      }
+      if (!specifier.endsWith('.js') && !specifier.endsWith('.ts') && !existsSync(base) && existsSync(`${base}.ts`)) {
+        return { url: pathToFileURL(`${base}.ts`).href, shortCircuit: true };
+      }
+    }
+    return next(specifier, context);
+  },
+  load(url, context, next) {
+    if (url.startsWith('file:') && url.endsWith('.ts')) {
+      const code = readFileSync(fileURLToPath(url), 'utf8');
+      return {
+        format: 'module',
+        source: stripTypeScriptTypes(code, { mode: 'transform', sourceUrl: url }),
+        shortCircuit: true
+      };
+    }
+    return next(url, context);
+  }
+});
+
+const access = await import(pathToFileURL(resolve(ROOT, 'lib/access.js')).href);
+const arabic = await import(pathToFileURL(resolve(ROOT, 'src/utils/arabicNumbers.ts')).href);
+const delivery = await import(pathToFileURL(resolve(ROOT, 'src/utils/deliveryAddress.ts')).href);
+const storeApi = await import(pathToFileURL(resolve(ROOT, 'api/store.ts')).href);
+
+function createMockRes() {
+  const headers = {};
+  return {
+    statusCode: 200,
+    headers,
+    body: null,
+    setHeader(k, v) {
+      headers[String(k).toLowerCase()] = String(v);
+    },
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(data) {
+      this.body = data;
+      return this;
+    },
+    end() {
+      return this;
+    }
+  };
+}
+
+function createMockReq({ method = 'GET', query = {}, body = undefined, headers = {} } = {}) {
+  const normalizedHeaders = Object.fromEntries(
+    Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v])
+  );
+  return {
+    method,
+    query,
+    url: `/api/store${method === 'GET' && Object.keys(query).length ? '?' + new URLSearchParams(query).toString() : ''}`,
+    headers: { host: 'qamar-fragrances.com', ...normalizedHeaders },
+    body
+  };
+}
+
+describe('RBAC & Access Policy (lib/access.js)', () => {
+  test('defines all 22 perfume ERP sections and exact owner email', () => {
+    assert.equal(access.OWNER_EMAIL, 'qamaraboalnaga@gmail.com');
+    assert.equal(access.ADMIN_SECTIONS.length, 22);
+    for (const sec of ['oils', 'notes_finder', 'pricing', 'labels', 'products', 'orders', 'security', 'settings']) {
+      assert.ok(access.ADMIN_SECTIONS.includes(sec), `Missing section ${sec}`);
+    }
+  });
+
+  test('full admin gets all 22 sections; unprivileged customer gets zero sections', () => {
+    const admin = { email: 'qamaraboalnaga@gmail.com', role: 'admin', admin_permissions: [] };
+    assert.equal(access.isFullAdmin(admin), true);
+    assert.equal(access.permittedSections(admin).length, 22);
+
+    const customer = { email: 'client@example.com', role: 'customer', admin_permissions: [] };
+    assert.equal(access.isFullAdmin(customer), false);
+    assert.deepEqual(access.permittedSections(customer), []);
+    assert.equal(access.canAccessSection(customer, 'orders'), false);
+    assert.equal(access.canAccessSection(null, 'overview'), false);
+  });
+
+  test('staff permissions normalize cleanly in canonical order and ignore unknown sections', () => {
+    const staff = { email: 'staff@qamar.eg', role: 'customer', admin_permissions: ['oils', 'notes_finder', 'fake_section'] };
+    assert.deepEqual(access.permittedSections(staff), ['notes_finder', 'oils']);
+    assert.equal(access.canAccessSection(staff, 'oils'), true);
+    assert.equal(access.canAccessSection(staff, 'pricing'), false);
+  });
+});
+
+describe('Arabic Formatting & Phone Normalization', () => {
+  test('formats digits and EGP currency into Arabic-Indic output', () => {
+    assert.equal(arabic.toArabicDigits('250 ml / 100'), '٢٥٠ ml / ١٠٠');
+    assert.equal(arabic.formatEGP(1250), '١,٢٥٠ ج.م.');
+    assert.equal(arabic.formatEGP(200, false), '200 ج.م.');
+  });
+
+  test('normalizes Egyptian phones including Arabic numerals and +20 prefix', () => {
+    assert.equal(delivery.normalizePhone('+20 101 234 5678'), '01012345678');
+    assert.equal(delivery.normalizePhone('00201155443322'), '01155443322');
+    assert.equal(delivery.normalizePhone('٠١٠١٢٣٤٥٦٧٨'), '01012345678');
+  });
+});
+
+describe('API Store Edge Caching & Security Boundary (api/store.ts)', () => {
+  const sampleProductsResult = {
+    products: [
+      {
+        id: 'p-1',
+        name_ar: 'عطر قمر الساحر',
+        price: 200,
+        cost_price: 95,
+        variants: [{ id: 'v1', label: '50ml', price: 200, costPrice: 70 }],
+        is_hidden: false
+      }
+    ],
+    total: 1
+  };
+
+  test('GET getProducts caches on CDN, ignores admin cookie & includeHidden, and strips costs', async () => {
+    let seenOpts = null;
+    const mockStore = {
+      async getProducts(opts) {
+        seenOpts = opts;
+        return structuredClone(sampleProductsResult);
+      }
+    };
+    const req = createMockReq({
+      method: 'GET',
+      query: { method: 'getProducts', limit: '400', offset: '0', includeHidden: 'true' },
+      headers: { cookie: 'qamar_session=admin-token-should-be-ignored' }
+    });
+    const res = createMockRes();
+
+    await storeApi.default(req, res, { sql: async () => [], store: mockStore, user: { role: 'admin' } });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(seenOpts.includeHidden, false);
+    assert.equal(res.headers['cache-control'], 'public, max-age=0, s-maxage=30, stale-while-revalidate=120');
+    assert.equal(res.body.result.products[0].cost_price, undefined);
+    assert.equal(res.body.result.products[0].variants[0].costPrice, undefined);
+  });
+
+  test('GET getProducts keeps no-store when result is empty', async () => {
+    const mockStore = {
+      async getProducts() {
+        return { products: [], total: 0 };
+      }
+    };
+    const req = createMockReq({ method: 'GET', query: { method: 'getProducts', limit: '40', offset: '0' } });
+    const res = createMockRes();
+
+    await storeApi.default(req, res, { sql: async () => [], store: mockStore });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.headers['cache-control'], 'no-store');
+  });
+
+  test('GET caches getCollections, getStoreSettings, and getFragranceNotes when non-empty', async () => {
+    const mockStore = {
+      async getCollections() { return [{ id: 'c1', handle: 'test', title_ar: 'عطور' }]; },
+      async getStoreSettings() { return { shipping_fee: 60 }; },
+      async getFragranceNotes() { return [{ product_id: 'p-1', top_notes: 'برغموت' }]; }
+    };
+
+    for (const method of ['getCollections', 'getStoreSettings', 'getFragranceNotes']) {
+      const req = createMockReq({ method: 'GET', query: { method } });
+      const res = createMockRes();
+      await storeApi.default(req, res, { sql: async () => [], store: mockStore });
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.headers['cache-control'], 'public, max-age=0, s-maxage=30, stale-while-revalidate=120', `Expected CDN cache header for ${method}`);
+    }
+  });
+
+  test('GET rejects mutations and private ERP endpoints with 405 and no-store', async () => {
+    for (const method of ['createOrder', 'getAllUsers', 'upsertOilReserve', 'updateBottleSupply', 'upsertFragranceNotes']) {
+      const req = createMockReq({ method: 'GET', query: { method } });
+      const res = createMockRes();
+      await storeApi.default(req, res, { sql: async () => [], store: {} });
+      assert.equal(res.statusCode, 405, `Expected 405 for GET ?method=${method}`);
+      assert.equal(res.headers['cache-control'], 'no-store');
+    }
+  });
+
+  test('POST sets no-store and enforces auth/section RBAC before touching DB', async () => {
+    let mutated = false;
+    const mockStore = {
+      async upsertOilReserve() { mutated = true; return { success: true }; },
+      async updateBottleSupply() { mutated = true; return { success: true }; },
+      async upsertFragranceNotes() { mutated = true; return { success: true }; },
+      async updateProduct() { mutated = true; return { success: true }; },
+      async getAllUsers() { mutated = true; return []; }
+    };
+
+    for (const method of ['upsertOilReserve', 'updateBottleSupply', 'upsertFragranceNotes', 'updateProduct', 'getAllUsers']) {
+      const req = createMockReq({
+        method: 'POST',
+        headers: { origin: 'https://qamar-fragrances.com' },
+        body: { method, args: [{}] }
+      });
+      const res = createMockRes();
+      await storeApi.default(req, res, { sql: async () => [], store: mockStore, user: null });
+      assert.equal(res.statusCode, 403, `Expected 403 for unauthenticated ${method}`);
+      assert.equal(res.headers['cache-control'], 'no-store');
+    }
+    assert.equal(mutated, false, 'Store methods must not run before auth fails');
+
+    // Staff with only 'oils' permission cannot edit fragrance notes (403)
+    const staffOnlyOils = { id: 's1', email: 's@q.eg', role: 'customer', admin_permissions: ['oils'] };
+    const reqDenied = createMockReq({
+      method: 'POST',
+      headers: { origin: 'https://qamar-fragrances.com' },
+      body: { method: 'upsertFragranceNotes', args: [{ product_id: 'p-1' }] }
+    });
+    const resDenied = createMockRes();
+    await storeApi.default(reqDenied, resDenied, { sql: async () => [], store: mockStore, user: staffOnlyOils });
+    assert.equal(resDenied.statusCode, 403);
+    assert.equal(mutated, false);
+
+    // Staff with 'oils' permission succeeds on upsertOilReserve
+    const reqAllowed = createMockReq({
+      method: 'POST',
+      headers: { origin: 'https://qamar-fragrances.com' },
+      body: { method: 'upsertOilReserve', args: [{ perfume_title: 'سوفاج' }] }
+    });
+    const resAllowed = createMockRes();
+    await storeApi.default(reqAllowed, resAllowed, { sql: async () => [], store: mockStore, user: staffOnlyOils });
+    assert.equal(resAllowed.statusCode, 200);
+    assert.equal(mutated, true);
+  });
+
+  test('POST createOrder validates Egyptian phone & totals and enforces safe QMR order number', async () => {
+    let seenPayload = null;
+    const fakeSql = Object.assign(async () => [], {
+      query: async (_queryText, params) => {
+        seenPayload = JSON.parse(params[0]);
+        return [{ id: seenPayload.id }];
+      }
+    });
+
+    const reqInvalid = createMockReq({
+      method: 'POST',
+      headers: { origin: 'https://qamar-fragrances.com' },
+      body: {
+        method: 'createOrder',
+        args: [{
+          customer_name: 'أحمد',
+          customer_phone: '12345',
+          governorate: 'القاهرة',
+          address_details: 'شارع عباس العقاد',
+          subtotal: 200,
+          shipping_fee: 60,
+          total: 260,
+          payment_method: 'cod',
+          items: [{ product: { id: 'p-1', price: 200 }, quantity: 1, unitPrice: 200 }]
+        }]
+      }
+    });
+    const resInvalid = createMockRes();
+    await storeApi.default(reqInvalid, resInvalid, { sql: fakeSql, store: {}, user: null });
+    assert.equal(resInvalid.statusCode, 400);
+    assert.equal(seenPayload, null);
+
+    const reqValid = createMockReq({
+      method: 'POST',
+      headers: { origin: 'https://qamar-fragrances.com' },
+      body: {
+        method: 'createOrder',
+        args: [{
+          order_number: 'BAD-SPOOF-999',
+          customer_name: 'محمد قمر',
+          customer_phone: '+20 101 234 5678',
+          governorate: 'القاهرة',
+          city: 'مدينة نصر',
+          address_details: 'شارع عباس العقاد',
+          subtotal: 400,
+          shipping_fee: 60,
+          total: 460,
+          payment_method: 'cod',
+          items: [{ product: { id: 'p-1', name_ar: 'عطر قمر', price: 200 }, selectedSize: '50ml', quantity: 2, unitPrice: 200 }]
+        }]
+      }
+    });
+    const resValid = createMockRes();
+    await storeApi.default(reqValid, resValid, { sql: fakeSql, store: {}, user: null });
+    assert.equal(resValid.statusCode, 200);
+    assert.equal(resValid.body.result, true);
+    assert.match(seenPayload.order_number, /^QMR-/);
+    assert.equal(seenPayload.customer_phone, '01012345678');
+    assert.equal(seenPayload.payment_status, 'unpaid');
+    assert.equal(seenPayload.order_status, 'pending');
+  });
+});
+
+describe('Frontend Client & Guard Wiring Contracts', () => {
+  test('neonDb client routes public catalog calls over GET and hidden admin reads over POST', () => {
+    const neonDbSrc = readFileSync(resolve(ROOT, 'src/services/neonDb.ts'), 'utf8');
+    assert.match(neonDbSrc, /async function callPublicStoreGet/);
+    assert.match(neonDbSrc, /if \(params\?\.includeHidden\)\s*\{\s*return await callStore\('getProducts'/);
+    assert.match(neonDbSrc, /callPublicStoreGet\('getCollections'\)/);
+    assert.match(neonDbSrc, /callPublicStoreGet\('getStoreSettings'\)/);
+  });
+
+  test('AdminDashboard places React hooks before the !canAccessAdmin access guard return', () => {
+    const adminSrc = readFileSync(resolve(ROOT, 'src/pages/admin/AdminDashboard.tsx'), 'utf8');
+    const hookIdx = adminSrc.indexOf('useState');
+    const guardIdx = adminSrc.indexOf('if (!canAccessAdmin)');
+    assert.ok(hookIdx !== -1 && guardIdx !== -1, 'Expected useState and !canAccessAdmin guard');
+    assert.ok(hookIdx < guardIdx, 'React hooks must execute unconditionally before !canAccessAdmin early return');
+  });
+});
