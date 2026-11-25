@@ -3,6 +3,7 @@ import { Search, ShoppingCart, User, ShieldCheck, X } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { formatEGP, toArabicDigits } from '../utils/arabicNumbers';
+import { InstallAppButton } from './PwaControls';
 
 export const Navbar: React.FC = () => {
   const {
@@ -61,7 +62,7 @@ export const Navbar: React.FC = () => {
       )}
 
       {/* Top Header Row: Logo (Right) - Search (Center) - Account & Cart (Left) */}
-      <div className="max-w-[1320px] mx-auto px-4 md:px-8 py-3 flex flex-wrap md:flex-nowrap items-center justify-between gap-3 md:gap-6">
+      <div className="max-w-[1320px] mx-auto px-3.5 sm:px-4 md:px-8 py-2.5 md:py-3 flex flex-wrap md:flex-nowrap items-center justify-between gap-2.5 md:gap-6">
         <button
           type="button"
           onClick={() => navigate('home')}
@@ -71,7 +72,7 @@ export const Navbar: React.FC = () => {
           <img
             src={settings.logo_url || '/qamar-images/626c06f2fe557fd9.webp'}
             alt="Qamar Fragrances"
-            className="h-12 md:h-14 w-auto object-contain"
+            className="h-10 sm:h-11 md:h-14 w-auto object-contain"
           />
         </button>
 
@@ -84,7 +85,7 @@ export const Navbar: React.FC = () => {
               onFocus={() => setShowSuggest(true)}
               onChange={e => { setLocalSearch(e.target.value); setShowSuggest(true); }}
               placeholder="ما الذي تبحث عنه؟"
-              className="w-full h-11 rounded-full border border-[#eaecf0] bg-white pr-5 pl-12 text-sm text-[#252a31] placeholder:text-gray-400 focus:outline-none focus:border-[#fe9931] transition"
+              className="w-full h-10 md:h-11 rounded-full border border-[#eaecf0] bg-[#f8f9fb] md:bg-white pr-4 md:pr-5 pl-12 text-sm text-[#252a31] placeholder:text-gray-400 focus:outline-none focus:bg-white focus:border-[#fe9931] transition"
             />
             {localSearch && (
               <button
@@ -132,8 +133,12 @@ export const Navbar: React.FC = () => {
           )}
         </div>
 
-        {/* Left Side: Login / Profile + Admin + Cart Pill */}
-        <div className="order-2 md:order-3 flex items-center gap-3 md:gap-4 shrink-0">
+        {/* Left Side: Mobile Install + Login / Profile + Admin + Cart Pill */}
+        <div className="order-2 md:order-3 flex items-center gap-2 sm:gap-3 md:gap-4 shrink-0">
+          <div className="md:hidden">
+            <InstallAppButton compact />
+          </div>
+
           {canAccessAdmin && (
             <button
               type="button"
@@ -149,7 +154,7 @@ export const Navbar: React.FC = () => {
             <button
               type="button"
               onClick={() => navigate('profile')}
-              className="flex items-center gap-1.5 text-sm font-medium text-[#252a31] hover:text-[#fe9931] transition"
+              className="hidden md:flex items-center gap-1.5 text-sm font-medium text-[#252a31] hover:text-[#fe9931] transition"
             >
               <User className="w-4 h-4" />
               <span className="max-w-[110px] truncate">{user.name || 'حسابي'}</span>
@@ -158,7 +163,7 @@ export const Navbar: React.FC = () => {
             <button
               type="button"
               onClick={() => openAuthModal()}
-              className="flex items-center gap-1.5 text-sm font-medium text-[#252a31] hover:text-[#fe9931] transition"
+              className="hidden md:flex items-center gap-1.5 text-sm font-medium text-[#252a31] hover:text-[#fe9931] transition"
             >
               <User className="w-4 h-4" />
               <span>تسجيل الدخول</span>
@@ -168,7 +173,7 @@ export const Navbar: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsCartOpen(true)}
-            className="relative flex items-center gap-2.5 bg-[#f3f4f6] hover:bg-[#e5e7eb] rounded-full px-3.5 py-2 transition"
+            className="relative flex items-center gap-2 bg-[#f3f4f6] hover:bg-[#e5e7eb] rounded-full px-3 py-1.5 md:px-3.5 md:py-2 transition"
             aria-label="السلة"
           >
             <div className="relative">
@@ -177,13 +182,13 @@ export const Navbar: React.FC = () => {
                 {cartCount}
               </span>
             </div>
-            <span className="text-sm font-semibold text-[#252a31]">{formatEGP(cartSubtotal)}</span>
+            <span className="hidden sm:inline text-sm font-semibold text-[#252a31]">{formatEGP(cartSubtotal)}</span>
           </button>
         </div>
       </div>
 
-      {/* Secondary Nav Row: Links (Right) - Social Circles (Left) */}
-      <div className="border-t border-gray-100">
+      {/* Desktop Secondary Nav Row (Mobile uses bottom app bar instead) */}
+      <div className="hidden md:block border-t border-gray-100">
         <div className="max-w-[1320px] mx-auto px-4 md:px-8 h-12 flex items-center justify-between">
           <nav className="flex items-center gap-6 md:gap-8 h-full text-sm font-semibold">
             <button
@@ -213,21 +218,11 @@ export const Navbar: React.FC = () => {
             >
               اتصل بنا
             </button>
-            {canAccessAdmin && (
-              <button
-                type="button"
-                onClick={() => navigate('admin')}
-                className={`sm:hidden h-full flex items-center border-b-[3px] transition ${
-                  currentTab === 'admin' ? 'border-[#fe9931] text-[#252a31]' : 'border-transparent text-[#fe9931]'
-                }`}
-              >
-                الإدارة
-              </button>
-            )}
           </nav>
 
-          {/* Social Circles */}
-          <div className="flex items-center gap-2">
+          {/* Desktop Install + Social Circles */}
+          <div className="flex items-center gap-2.5">
+            <InstallAppButton compact />
             <a href={socialHref('facebook')} target="_blank" rel="noreferrer" aria-label="Facebook"
                className="w-7 h-7 rounded-full bg-[#252a31] text-white flex items-center justify-center hover:bg-[#fe9931] transition text-xs font-bold">
               f

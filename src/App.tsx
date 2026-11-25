@@ -5,6 +5,8 @@ import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
 import { CartDrawer } from './components/CartDrawer';
 import { AuthModal } from './components/AuthModal';
+import { PwaStatus } from './components/PwaControls';
+import { MobileBottomNav } from './components/MobileBottomNav';
 import { Home } from './pages/Home';
 import { Shop } from './pages/Shop';
 import { ProductDetails } from './pages/ProductDetails';
@@ -34,6 +36,7 @@ const StorefrontRouter: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-white">
+      <PwaStatus />
       <Navbar />
       <div className="flex-1">
         {currentTab === 'home' && <Home />}
@@ -47,6 +50,7 @@ const StorefrontRouter: React.FC = () => {
         {currentTab === 'profile' && <Profile />}
       </div>
       <Footer />
+      <MobileBottomNav />
       <CartDrawer />
       <AuthModal />
     </div>

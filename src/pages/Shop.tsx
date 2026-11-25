@@ -92,7 +92,36 @@ export const Shop: React.FC = () => {
   }, [totalPages, safePage]);
 
   return (
-    <main className="max-w-[1320px] mx-auto px-4 md:px-8 py-8 min-h-[70vh]">
+    <main className="max-w-[1320px] mx-auto px-3.5 sm:px-4 md:px-8 py-5 md:py-8 min-h-[70vh]">
+      {/* Mobile Quick Collection Chips */}
+      <div className="md:hidden flex items-center gap-2 overflow-x-auto no-scrollbar pb-3 mb-3 border-b border-gray-100">
+        <button
+          type="button"
+          onClick={() => setSelectedCategory('all')}
+          className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold border transition ${
+            selectedCategory === 'all' || !selectedCategory
+              ? 'bg-[#fe9931] text-white border-[#fe9931]'
+              : 'bg-gray-50 text-[#4f4335] border-gray-200'
+          }`}
+        >
+          الكل
+        </button>
+        {collections.map(col => (
+          <button
+            key={col.id}
+            type="button"
+            onClick={() => setSelectedCategory(col.handle)}
+            className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold border transition ${
+              selectedCategory === col.handle
+                ? 'bg-[#fe9931] text-white border-[#fe9931]'
+                : 'bg-gray-50 text-[#4f4335] border-gray-200'
+            }`}
+          >
+            {col.title}
+          </button>
+        ))}
+      </div>
+
       {activeCollectionObj && (
         <div className="mb-6 pb-4 border-b border-gray-100 flex items-center justify-between">
           <div>

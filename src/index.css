@@ -12,12 +12,27 @@
 html {
   font-family: "Cairo", "Inter", "Almarai", sans-serif;
   scroll-behavior: smooth;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
   background-color: #ffffff;
   color: #252a31;
   margin: 0;
+  overscroll-behavior-y: contain;
+}
+
+button,
+a {
+  touch-action: manipulation;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* Custom scrollbar for clean drawers */

@@ -93,7 +93,7 @@ export const ProductDetails: React.FC = () => {
   };
 
   return (
-    <main className="max-w-[1320px] mx-auto px-4 md:px-8 py-6 pb-24">
+    <main className="max-w-[1320px] mx-auto px-4 md:px-8 py-5 md:py-6 pb-36 md:pb-24">
       {/* Breadcrumb */}
       <div className="flex items-center gap-1.5 text-sm text-gray-500 mb-6">
         <button type="button" onClick={() => navigate('shop', { category: 'all', search: '' })} className="hover:text-[#fe9931] flex items-center gap-1">
@@ -377,9 +377,9 @@ export const ProductDetails: React.FC = () => {
         </section>
       )}
 
-      {/* Sticky Bottom Quick-Bar */}
+      {/* Sticky Bottom Quick-Bar (Sits above bottom app bar on mobile, flush bottom on laptop) */}
       {showSticky && (
-        <div className="fixed bottom-0 inset-x-0 z-30 bg-white border-t border-gray-200 shadow-lg py-2.5 px-4">
+        <div className="fixed bottom-16 md:bottom-0 inset-x-0 z-30 bg-white border-t border-gray-200 shadow-lg py-2.5 px-4">
           <div className="max-w-[1320px] mx-auto flex items-center justify-between gap-4">
             <div className="flex items-center gap-3 min-w-0">
               <img src={images[0]} alt="" className="w-11 h-11 rounded-lg object-cover border border-gray-100 shrink-0" />

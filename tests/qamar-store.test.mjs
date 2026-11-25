@@ -517,3 +517,32 @@ describe('WhatsApp CRM Automation & Security Boundary', () => {
     assert.equal(dispatched[0].recipient, '01012345678');
   });
 });
+
+describe('Installable PWA & Mobile/Desktop Responsive Contracts', () => {
+  test('manifest.webmanifest defines standalone install config, shortcuts, and existing PNG icons', () => {
+    const manifest = JSON.parse(readFileSync(resolve(ROOT, 'public/manifest.webmanifest'), 'utf8'));
+    assert.equal(manifest.display, 'standalone');
+    assert.equal(manifest.start_url, '/ar');
+    assert.ok(Array.isArray(manifest.icons) && manifest.icons.length >= 2);
+    for (const icon of manifest.icons) {
+      const diskPath = resolve(ROOT, 'public', icon.src.replace(/^\//, ''));
+      assert.ok(existsSync(diskPath), `Missing manifest icon file: ${diskPath}`);
+    }
+    assert.ok(existsSync(resolve(ROOT, 'public/pwa/apple-touch-icon.png')));
+  });
+
+  test('Service Worker builder keeps /api/ network-only and provides fetch + SKIP_WAITING', () => {
+    const buildPwaSrc = readFileSync(resolve(ROOT, 'scripts/build_pwa.mjs'), 'utf8');
+    assert.match(buildPwaSrc, /url\.pathname\.startsWith\('\/api\/'\)\) return/);
+    assert.match(buildPwaSrc, /SKIP_WAITING/);
+    assert.match(buildPwaSrc, /\/offline\.html/);
+  });
+
+  test('App renders PwaStatus and dedicated MobileBottomNav shell', () => {
+    const appSrc = readFileSync(resolve(ROOT, 'src/App.tsx'), 'utf8');
+    const bottomSrc = readFileSync(resolve(ROOT, 'src/components/MobileBottomNav.tsx'), 'utf8');
+    assert.match(appSrc, /PwaStatus/);
+    assert.match(appSrc, /MobileBottomNav/);
+    assert.match(bottomSrc, /md:hidden/);
+  });
+});

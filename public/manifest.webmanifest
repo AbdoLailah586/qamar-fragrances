@@ -1,15 +1,55 @@
 {
-  "id": "/",
-  "name": "Qamar Fragrances | قمر للعطور",
-  "short_name": "Qamar Fragrances",
-  "description": "عطور محاكاة بجودة مطابقة للأوريجينال — قمر للعطور",
+  "id": "/ar",
+  "name": "قمر للعطور | Qamar Fragrances",
+  "short_name": "قمر للعطور",
+  "description": "عطور محاكاة ونيش بجودة مطابقة للأوريجينال — قمر للعطور",
   "start_url": "/ar",
   "scope": "/",
+  "lang": "ar",
+  "dir": "rtl",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
   "background_color": "#ffffff",
   "theme_color": "#fe9931",
+  "categories": ["shopping", "lifestyle"],
   "icons": [
-    { "src": "/qamar-images/dcfeffa82651d149.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/qamar-images/dcfeffa82651d149.png", "sizes": "512x512", "type": "image/png" }
+    {
+      "src": "/pwa/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "تصفح العطور",
+      "short_name": "المتجر",
+      "url": "/ar/shop",
+      "icons": [{ "src": "/pwa/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "تتبع الطلب",
+      "short_name": "طلباتي",
+      "url": "/ar/track-order",
+      "icons": [{ "src": "/pwa/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "السلة",
+      "short_name": "السلة",
+      "url": "/ar/cart",
+      "icons": [{ "src": "/pwa/icon-192.png", "sizes": "192x192" }]
+    }
   ]
 }

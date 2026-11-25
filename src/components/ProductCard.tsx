@@ -14,7 +14,7 @@ export const ProductCard: React.FC<Props> = ({ product }) => {
   const fav = isInWishlist(product.id);
 
   return (
-    <div className="bg-white flex flex-col justify-between group">
+    <div className="bg-white flex flex-col justify-between group rounded-2xl p-2 border border-gray-100 shadow-[0_1px_6px_rgba(0,0,0,0.03)] md:rounded-none md:p-0 md:border-0 md:shadow-none">
       <div>
         <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-[#f8f9fa] border border-gray-100">
           <button
@@ -51,19 +51,19 @@ export const ProductCard: React.FC<Props> = ({ product }) => {
         <button
           type="button"
           onClick={() => openProduct(product)}
-          className="w-full text-right mt-3 focus:outline-none"
+          className="w-full text-right mt-2.5 md:mt-3 focus:outline-none"
         >
-          <h3 className="text-[14px] md:text-[15px] font-medium text-[#252a31] line-clamp-2 min-h-[42px] leading-snug group-hover:text-[#fe9931] transition">
+          <h3 className="text-[13px] md:text-[15px] font-semibold md:font-medium text-[#252a31] line-clamp-2 min-h-[38px] md:min-h-[42px] leading-snug group-hover:text-[#fe9931] transition">
             {product.name_ar}
           </h3>
         </button>
 
-        <div className="mt-1.5 mb-3 flex items-center gap-2">
-          <span className="text-[16px] font-bold text-[#252a31]">
+        <div className="mt-1 md:mt-1.5 mb-2.5 md:mb-3 flex items-center gap-2">
+          <span className="text-[14px] md:text-[16px] font-bold text-[#252a31]">
             {formatEGP(product.price)}
           </span>
           {product.original_price && product.original_price > product.price && (
-            <span className="text-xs text-gray-400 line-through">
+            <span className="text-[11px] md:text-xs text-gray-400 line-through">
               {formatEGP(product.original_price)}
             </span>
           )}
@@ -74,7 +74,7 @@ export const ProductCard: React.FC<Props> = ({ product }) => {
         <button
           type="button"
           onClick={() => openProduct(product)}
-          className="w-full py-2.5 px-4 rounded-full border border-gray-300 text-sm font-medium text-[#252a31] hover:border-[#fe9931] hover:text-[#fe9931] transition text-center"
+          className="w-full py-2 md:py-2.5 px-3 md:px-4 rounded-full border border-gray-300 text-xs md:text-sm font-semibold md:font-medium text-[#252a31] hover:border-[#fe9931] hover:text-[#fe9931] transition text-center"
         >
           حدد اختيارك
         </button>
@@ -83,7 +83,7 @@ export const ProductCard: React.FC<Props> = ({ product }) => {
           type="button"
           disabled={!product.in_stock}
           onClick={() => buyNow(product, 1, product.variants?.[0] || null)}
-          className="w-full py-2.5 px-4 rounded-full border border-gray-300 text-sm font-medium text-[#252a31] hover:border-[#fe9931] hover:bg-[#fe9931] hover:text-white disabled:opacity-50 transition text-center"
+          className="w-full py-2 md:py-2.5 px-3 md:px-4 rounded-full border border-gray-300 text-xs md:text-sm font-semibold md:font-medium text-[#252a31] hover:border-[#fe9931] hover:bg-[#fe9931] hover:text-white disabled:opacity-50 transition text-center"
         >
           اشتري الآن
         </button>

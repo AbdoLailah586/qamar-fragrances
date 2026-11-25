@@ -1,12 +1,13 @@
 import React from 'react';
 import { useStore } from '../context/StoreContext';
+import { InstallAppButton } from './PwaControls';
 
 export const Footer: React.FC = () => {
   const { settings, navigate } = useStore();
   const socialHref = (name: string) => settings.social_links.find(s => s.name === name)?.link || '#';
 
   return (
-    <footer className="bg-white border-t border-[#eaeaea] mt-16 py-12 px-4">
+    <footer className="bg-white border-t border-[#eaeaea] mt-12 md:mt-16 pt-10 pb-24 md:py-12 px-4">
       <div className="max-w-[1320px] mx-auto flex flex-col items-center justify-center gap-6 text-center">
         <button type="button" onClick={() => navigate('home')} className="focus:outline-none">
           <img
@@ -49,6 +50,8 @@ export const Footer: React.FC = () => {
             TT
           </a>
         </div>
+
+        <InstallAppButton />
 
         <p className="text-xs text-gray-400">
           {settings.address_ar} • {settings.phone}
