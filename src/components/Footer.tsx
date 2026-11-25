@@ -1,10 +1,10 @@
 import React from 'react';
 import { useStore } from '../context/StoreContext';
 import { InstallAppButton } from './PwaControls';
+import { SocialIconLinks } from './SocialIcons';
 
 export const Footer: React.FC = () => {
   const { settings, navigate } = useStore();
-  const socialHref = (name: string) => settings.social_links.find(s => s.name === name)?.link || '#';
 
   return (
     <footer className="bg-white border-t border-[#eaeaea] mt-12 md:mt-16 pt-10 pb-24 md:py-12 px-4">
@@ -32,24 +32,7 @@ export const Footer: React.FC = () => {
           </button>
         </div>
 
-        <div className="flex items-center justify-center gap-3">
-          <a href={socialHref('facebook')} target="_blank" rel="noreferrer" aria-label="Facebook"
-             className="w-9 h-9 rounded-full border border-gray-300 text-[#252a31] flex items-center justify-center hover:border-[#fe9931] hover:text-[#fe9931] transition text-xs font-bold">
-            f
-          </a>
-          <a href={socialHref('instagram')} target="_blank" rel="noreferrer" aria-label="Instagram"
-             className="w-9 h-9 rounded-full border border-gray-300 text-[#252a31] flex items-center justify-center hover:border-[#fe9931] hover:text-[#fe9931] transition text-xs font-bold">
-            IG
-          </a>
-          <a href={socialHref('whatsapp')} target="_blank" rel="noreferrer" aria-label="WhatsApp"
-             className="w-9 h-9 rounded-full border border-gray-300 text-[#252a31] flex items-center justify-center hover:border-[#fe9931] hover:text-[#fe9931] transition text-xs font-bold">
-            WA
-          </a>
-          <a href={socialHref('tiktok')} target="_blank" rel="noreferrer" aria-label="TikTok"
-             className="w-9 h-9 rounded-full border border-gray-300 text-[#252a31] flex items-center justify-center hover:border-[#fe9931] hover:text-[#fe9931] transition text-xs font-bold">
-            TT
-          </a>
-        </div>
+        <SocialIconLinks variant="footer" />
 
         <InstallAppButton />
 

@@ -555,4 +555,15 @@ describe('Installable PWA & Mobile/Desktop Responsive Contracts', () => {
     assert.match(homeSrc, /qamar-hero-kenburns/);
     assert.match(homeSrc, /qamar-hero-up/);
   });
+
+  test('Navbar and Footer render real vector SocialIconLinks instead of plain text abbreviations', () => {
+    const navSrc = readFileSync(resolve(ROOT, 'src/components/Navbar.tsx'), 'utf8');
+    const footerSrc = readFileSync(resolve(ROOT, 'src/components/Footer.tsx'), 'utf8');
+    const socialSrc = readFileSync(resolve(ROOT, 'src/components/SocialIcons.tsx'), 'utf8');
+    assert.match(navSrc, /SocialIconLinks/);
+    assert.match(footerSrc, /SocialIconLinks/);
+    assert.doesNotMatch(navSrc, />IG<|>WA<|>TT</);
+    assert.doesNotMatch(footerSrc, />IG<|>WA<|>TT</);
+    assert.match(socialSrc, /<svg viewBox="0 0 24 24"/);
+  });
 });

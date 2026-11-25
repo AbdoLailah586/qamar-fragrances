@@ -4,6 +4,7 @@ import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { formatEGP, toArabicDigits } from '../utils/arabicNumbers';
 import { InstallAppButton } from './PwaControls';
+import { SocialIconLinks } from './SocialIcons';
 
 export const Navbar: React.FC = () => {
   const {
@@ -49,9 +50,6 @@ export const Navbar: React.FC = () => {
     setSearchQuery(localSearch);
     navigate('shop', { search: localSearch, category: 'all' });
   };
-
-  const socialHref = (name: string) =>
-    settings.social_links.find(s => s.name === name)?.link || '#';
 
   return (
     <header className="w-full bg-white sticky top-0 z-40 shadow-[0_1px_0_0_#eaeaea]">
@@ -220,25 +218,10 @@ export const Navbar: React.FC = () => {
             </button>
           </nav>
 
-          {/* Desktop Install + Social Circles */}
+          {/* Desktop Install + Real Brand Social Circles */}
           <div className="flex items-center gap-2.5">
             <InstallAppButton compact />
-            <a href={socialHref('facebook')} target="_blank" rel="noreferrer" aria-label="Facebook"
-               className="w-7 h-7 rounded-full bg-[#252a31] text-white flex items-center justify-center hover:bg-[#fe9931] transition text-xs font-bold">
-              f
-            </a>
-            <a href={socialHref('instagram')} target="_blank" rel="noreferrer" aria-label="Instagram"
-               className="w-7 h-7 rounded-full bg-[#252a31] text-white flex items-center justify-center hover:bg-[#fe9931] transition text-[11px] font-bold">
-              IG
-            </a>
-            <a href={socialHref('whatsapp')} target="_blank" rel="noreferrer" aria-label="WhatsApp"
-               className="w-7 h-7 rounded-full bg-[#252a31] text-white flex items-center justify-center hover:bg-[#fe9931] transition text-[11px] font-bold">
-              WA
-            </a>
-            <a href={socialHref('tiktok')} target="_blank" rel="noreferrer" aria-label="TikTok"
-               className="w-7 h-7 rounded-full bg-[#252a31] text-white flex items-center justify-center hover:bg-[#fe9931] transition text-[11px] font-bold">
-              TT
-            </a>
+            <SocialIconLinks variant="header" />
           </div>
         </div>
       </div>
