@@ -1,0 +1,277 @@
+import { randomBytes } from 'node:crypto';
+import { normalizePhone } from '../src/utils/deliveryAddress.js';
+import type { Order, StoreSettings, WhatsAppNotificationType, WhatsAppTemplates } from '../src/types.js';
+
+export const DEFAULT_WHATSAPP_TEMPLATES: Required<WhatsAppTemplates> = {
+  order_confirmed: [
+    `*أهلاً بك يا {customer_name} في قمر للعطور | Qamar Fragrances* ✨`,
+    ``,
+    `تم استلام طلبك رقم *#{order_number}* بنجاح وجاري مراجعته وتجهيزه لك بعناية.`,
+    ``,
+    `🛍️ *تفاصيل العطور:*`,
+    `{items}`,
+    ``,
+    `🚚 الشحن ({governorate}): *{shipping_fee} ج.م.*`,
+    `💰 *الإجمالي النهائي:* *{total} ج.م.* ({payment_method})`,
+    `📍 العنوان: {address}`,
+    ``,
+    `سيصلك إشعار فور شحن الطلب مع المندوب. شرفنا تواصلك!`
+  ].join('\n'),
+  payment_verified: [
+    `*تم تأكيد الدفع بنجاح - قمر للعطور* 💳✅`,
+    ``,
+    `عزيزنا *{customer_name}*،`,
+    `تم مراجعة وتأكيد الدفع لطلبك رقم *#{order_number}* بمبلغ *{total} ج.م.* بنجاح.`,
+    `جاري الآن تجهيز وتغليف عطورك لتسليمها لشركة الشحن.`
+  ].join('\n'),
+  shipped: [
+    `*شحنتك في الطريق إليك - قمر للعطور* 🚚✨`,
+    ``,
+    `عزيزنا *{customer_name}*،`,
+    `تم تسليم طلبك رقم *#{order_number}* إلى: *{courier_name}*.`,
+    `📍 العنوان: {governorate}`,
+    `💰 المطلوب عند الاستلام: {cod_due}`,
+    ``,
+    `يرجى إبقاء هاتفك متاحاً للرد على المندوب.`
+  ].join('\n'),
+  out_for_delivery: [
+    `*مندوب التوصيل في طريقه إليك اليوم - قمر للعطور* 📦🛵`,
+    ``,
+    `عزيزنا *{customer_name}*،`,
+    `طلبك رقم *#{order_number}* خرج مع المندوب الآن وسيصلك اليوم بإذن الله.`,
+    `💰 المطلوب عند الاستلام: *{cod_due}*`
+  ].join('\n'),
+  delivered: [
+    `*تم تسليم طلبك بنجاح - قمر للعطور* 🌸🖤`,
+    ``,
+    `تتهنى بعطورك يا *{customer_name}*!`,
+    `يسعدنا إتمام تسليم طلبك رقم *#{order_number}*.`,
+    `نتمنى لك ثباتاً وفوحاناً يدوم مع كل حضور ✨`
+  ].join('\n'),
+  cancelled: [
+    `*تحديث بخصوص طلبك #{order_number} - قمر للعطور*`,
+    ``,
+    `عزيزنا *{customer_name}*،`,
+    `تم إلغاء الطلب رقم *#{order_number}*. لأي استفسار أو إعادة طلب يسعدنا الرد عليك هنا.`
+  ].join('\n'),
+  review_request: [
+    `⭐ *كيف كانت تجربتك مع قمر للعطور (Qamar Fragrances)؟*`,
+    ``,
+    `عزيزنا *{customer_name}*،`,
+    `نتمنى أن تكون عطور طلبك *#{order_number}* قد نالت إعجابك بثباتها وجودتها!`,
+    `رأيك يهمنا جداً — يسعدنا تقييمك بالرد على هذه الرسالة ❤️🌸`
+  ].join('\n')
+};
+
+export function formatWhatsAppPhone(raw: string): string {
+  const local = normalizePhone(raw);
+  if (/^01[0-9]{9}$/.test(local)) return `2${local}`;
+  const digits = String(raw || '').replace(/\D/g, '');
+  return digits.startsWith('00') ? digits.slice(2) : digits;
+}
+
+function renderTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{([a-z0-9_]+)\}/gi, (_, key) => vars[key] ?? '');
+}
+
+export function buildServerOrderWhatsAppMessage(
+  type: WhatsAppNotificationType,
+  order: Partial<Order> & { items?: any[] },
+  settings?: Partial<StoreSettings> | null,
+  customText?: string
+): string {
+  if (customText && customText.trim()) return customText.trim();
+  const templates = { ...DEFAULT_WHATSAPP_TEMPLATES, ...(settings?.whatsapp_templates || {}) };
+  const template = templates[type] || DEFAULT_WHATSAPP_TEMPLATES.order_confirmed;
+
+  const itemsText = (Array.isArray(order.items) ? order.items : [])
+    .map((item: any, idx: number) => {
+      const name = item?.product?.name_ar || item?.name_ar || 'عطر';
+      const size = item?.selectedSize ? ` (${item.selectedSize})` : '';
+      const qty = Number(item?.quantity || 1);
+      const unit = Number(item?.unitPrice ?? item?.product?.price ?? 0);
+      return `${idx + 1}. ${name}${size} × ${qty} = ${Math.round(unit * qty)} ج.م.`;
+    })
+    .join('\n');
+
+  const paymentLabel =
+    order.payment_method === 'cod'
+      ? 'الدفع عند الاستلام'
+      : order.payment_method === 'instapay'
+        ? 'إنستاباي InstaPay'
+        : order.payment_method === 'vodafone_cash'
+          ? 'فودافون كاش'
+          : 'بطاقة بنكية';
+
+  const codDue =
+    order.payment_status === 'paid' || order.payment_status === 'verified'
+      ? '0 ج.م. (مدفوع مسبقاً)'
+      : `${Math.round(Number(order.total || 0))} ج.م.`;
+
+  const address = [order.governorate, order.city, order.address_details].filter(Boolean).join(' - ');
+
+  return renderTemplate(template, {
+    customer_name: order.customer_name || 'عميلنا العزيز',
+    order_number: order.order_number || order.id || '',
+    items: itemsText || 'منتجات متجر قمر للعطور',
+    shipping_fee: String(Math.round(Number(order.shipping_fee || 0))),
+    subtotal: String(Math.round(Number(order.subtotal || 0))),
+    total: String(Math.round(Number(order.total || 0))),
+    payment_method: paymentLabel,
+    cod_due: codDue,
+    governorate: order.governorate || '',
+    address: address || order.governorate || '',
+    courier_name: order.courier_name || 'مندوب شحن قمر للعطور'
+  });
+}
+
+export async function ensureWhatsAppNotificationsTable(sql: any) {
+  await sql.query(`
+    CREATE TABLE IF NOT EXISTS whatsapp_notifications (
+      id VARCHAR(120) PRIMARY KEY,
+      order_id VARCHAR(120),
+      order_number VARCHAR(120),
+      phone VARCHAR(40) NOT NULL,
+      notification_type VARCHAR(60) NOT NULL DEFAULT 'custom',
+      message_text TEXT NOT NULL,
+      status VARCHAR(30) NOT NULL DEFAULT 'pending',
+      error_message TEXT,
+      sender_email VARCHAR(200),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+}
+
+export function resolveCrmConfig(settings?: any) {
+  const baseUrl = String(settings?.whatsapp_automation_url || process.env.WHATSAPP_CRM_URL || '').trim().replace(/\/+$/, '');
+  const email = String(settings?.whatsapp_automation_email || process.env.WHATSAPP_CRM_EMAIL || '').trim();
+  const password = String(settings?.whatsapp_automation_pass || process.env.WHATSAPP_CRM_PASSWORD || '');
+  return {
+    baseUrl,
+    email,
+    password,
+    configured: Boolean(baseUrl && email && password),
+    autoSendOnOrder: settings?.auto_send_on_order !== false,
+    autoSendOnStatusChange: settings?.auto_send_on_status_change !== false
+  };
+}
+
+export async function dispatchWhatsAppViaCrm(
+  sql: any,
+  params: {
+    recipient: string;
+    text: string;
+    type: WhatsAppNotificationType;
+    orderId?: string;
+    orderNumber?: string;
+    settings?: any;
+  },
+  fetchFn: typeof fetch = fetch
+): Promise<{ success: boolean; status: 'sent' | 'failed'; error?: string; waLink: string }> {
+  const formattedPhone = formatWhatsAppPhone(params.recipient);
+  const waLink = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(params.text)}`;
+
+  if (!formattedPhone || formattedPhone.length < 10) {
+    return { success: false, status: 'failed', error: 'رقم واتساب العميل غير صالح.', waLink };
+  }
+
+  let settings = params.settings;
+  if (!settings) {
+    try {
+      const rows = await sql`SELECT settings FROM store_settings WHERE id = 'main' LIMIT 1;`;
+      settings = rows[0]?.settings || {};
+    } catch {
+      settings = {};
+    }
+  }
+
+  const crm = resolveCrmConfig(settings);
+  let status: 'sent' | 'failed' = 'failed';
+  let errorMsg = '';
+
+  if (!crm.configured) {
+    errorMsg = 'بيانات منصة WhatsApp Pro CRM غير مضبوطة (أضف WHATSAPP_CRM_* أو احفظها في لوحة الإدارة).';
+  } else {
+    try {
+      const loginRes = await fetchFn(`${crm.baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: crm.email, password: crm.password }),
+        signal: AbortSignal.timeout(8000)
+      });
+      if (!loginRes.ok) {
+        throw new Error(`فشل تسجيل الدخول لـ CRM (${loginRes.status})`);
+      }
+      const loginData: any = await loginRes.json();
+      const jwt = loginData?.token || loginData?.accessToken || loginData?.data?.token;
+      if (!jwt) throw new Error('لم يتم استلام رمز JWT من منصة CRM');
+
+      const sendRes = await fetchFn(`${crm.baseUrl}/api/send`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${jwt}`
+        },
+        body: JSON.stringify({ to: formattedPhone, text: params.text }),
+        signal: AbortSignal.timeout(8000)
+      });
+      if (!sendRes.ok) {
+        const bodyTxt = await sendRes.text().catch(() => '');
+        throw new Error(`خطأ إرسال CRM (${sendRes.status}): ${bodyTxt.slice(0, 120)}`);
+      }
+      status = 'sent';
+    } catch (err: any) {
+      errorMsg = err?.message || 'تعذر الاتصال بمنصة WhatsApp Pro CRM';
+    }
+  }
+
+  try {
+    await ensureWhatsAppNotificationsTable(sql);
+    const id = `wa-${Date.now()}-${randomBytes(3).toString('hex')}`;
+    await sql`
+      INSERT INTO whatsapp_notifications (id, order_id, order_number, phone, notification_type, message_text, status, error_message, sender_email)
+      VALUES (${id}, ${params.orderId || null}, ${params.orderNumber || null}, ${formattedPhone}, ${params.type}, ${params.text}, ${status}, ${errorMsg || null}, ${crm.email || null});
+    `;
+  } catch {}
+
+  return {
+    success: status === 'sent',
+    status,
+    error: errorMsg || undefined,
+    waLink
+  };
+}
+
+export async function testWhatsAppCrmConnection(settings?: any, fetchFn: typeof fetch = fetch) {
+  const crm = resolveCrmConfig(settings);
+  if (!crm.configured) {
+    return {
+      success: false,
+      error: 'أدخل رابط وبريد وكلمة مرور WhatsApp Pro CRM أو أضف متغيرات WHATSAPP_CRM_* في Vercel.'
+    };
+  }
+  try {
+    const res = await fetchFn(`${crm.baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: crm.email, password: crm.password }),
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!res.ok) {
+      return { success: false, error: `رفض الخادم تسجيل الدخول (${res.status}). راجع البريد وكلمة المرور.` };
+    }
+    const data: any = await res.json().catch(() => ({}));
+    const token = data?.token || data?.accessToken || data?.data?.token;
+    if (!token) {
+      return { success: false, error: 'الخادم لم يُرجع رمز JWT.' };
+    }
+    return {
+      success: true,
+      url: crm.baseUrl,
+      email: crm.email,
+      message: `متصل بنجاح بحساب ${crm.email}`
+    };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'تعذر الوصول إلى رابط WhatsApp Pro CRM.' };
+  }
+}

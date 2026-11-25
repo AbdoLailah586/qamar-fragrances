@@ -31,6 +31,9 @@ export const OrderSuccess: React.FC = () => {
         <p className="text-sm text-gray-500">
           رقم طلبك هو <span className="font-bold text-[#fe9931]" dir="ltr">{currentOrder.order_number}</span>
         </p>
+        <p className="text-xs font-bold text-green-700 bg-green-50 border border-green-200 rounded-full px-4 py-1.5 inline-block">
+          ✓ يتم إرسال رسالة تأكيد الطلب تلقائياً على رقم الواتساب المسجل
+        </p>
 
         <div className="bg-gray-50 rounded-2xl p-4 text-right text-sm space-y-2">
           <div className="flex justify-between"><span className="text-gray-500">الاسم:</span><span className="font-bold">{currentOrder.customer_name}</span></div>

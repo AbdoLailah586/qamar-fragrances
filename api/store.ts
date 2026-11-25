@@ -5,6 +5,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { canAccessSection, isFullAdmin, normalizePermissions, publicUser, OWNER_EMAIL } from '../lib/access.js';
 import { normalizePhone } from '../src/utils/deliveryAddress.js';
 import { saveOrder, cancelOrder as cancelStoredOrder } from '../server/orderWrites.js';
+import { buildServerOrderWhatsAppMessage, dispatchWhatsAppViaCrm, resolveCrmConfig } from '../server/whatsappCrm.js';
 
 const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
 const forbidden = () => fail(403, 'هذا الإجراء غير متاح ضمن صلاحيات حسابك.');
@@ -44,8 +45,23 @@ const policies: Record<string, string[]> = {
   updateStoreSettings: ['overview', 'products', 'settings'],
   getAllProductReviews: ['overview', 'products'],
   updateProductReviewStatus: ['overview', 'products'],
-  deleteProductReview: ['overview', 'products']
+  deleteProductReview: ['overview', 'products'],
+  getWhatsAppAdminConfig: ['whatsapp', 'settings'],
+  saveWhatsAppAdminConfig: ['whatsapp', 'settings'],
+  testWhatsAppConnection: ['whatsapp', 'settings'],
+  getWhatsAppNotifications: ['whatsapp', 'orders'],
+  sendOrderWhatsApp: ['whatsapp', 'orders', 'fulfillment'],
+  sendTestWhatsApp: ['whatsapp', 'settings']
 };
+
+function safeSettings(settings: any) {
+  if (!settings || typeof settings !== 'object') return settings;
+  const copy = { ...settings };
+  delete copy.whatsapp_automation_url;
+  delete copy.whatsapp_automation_email;
+  delete copy.whatsapp_automation_pass;
+  return copy;
+}
 
 function safeProduct(product: any, privileged: boolean) {
   if (privileged) return product;
@@ -201,7 +217,7 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
   }
 
   if (method === 'getCollections') return store.getCollections();
-  if (method === 'getStoreSettings') return store.getStoreSettings();
+  if (method === 'getStoreSettings') return safeSettings(await store.getStoreSettings());
   if (method === 'getFragranceNotes') return store.getFragranceNotes();
 
   if (method === 'getOrders') {
@@ -212,7 +228,16 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
   }
 
   if (method === 'updateStoreSettings') {
-    return store.updateStoreSettings(args[0]);
+    const current = (await store.getStoreSettings().catch(() => null)) || {};
+    const incoming = args[0] && typeof args[0] === 'object' ? { ...args[0] } : {};
+    // Keep server-side CRM secrets intact unless explicitly updated from the dedicated WhatsApp panel
+    const merged = {
+      ...incoming,
+      whatsapp_automation_url: current.whatsapp_automation_url,
+      whatsapp_automation_email: current.whatsapp_automation_email,
+      whatsapp_automation_pass: current.whatsapp_automation_pass
+    };
+    return store.updateStoreSettings(merged);
   }
 
   if (method === 'getAllUsers') return (await store.getAllUsers()).map(publicUser);
@@ -298,6 +323,37 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
     if (changes.payment_status && !['unpaid', 'paid', 'verified'].includes(changes.payment_status)) throw fail(400, 'حالة الدفع غير صالحة.');
     if (changes.order_status === 'cancelled') return cancelStoredOrder(sql, args[0], 'إلغاء من لوحة الإدارة', 'admin');
     await sql`UPDATE orders SET status=COALESCE(${changes.order_status || null},status), payment_status=COALESCE(${changes.payment_status || null},payment_status), updated_at=NOW() WHERE id=${args[0]}`;
+    if (!deps || deps.dispatchWhatsApp) {
+      try {
+        const typeMap: Record<string, any> = {
+          confirmed: 'order_confirmed',
+          shipped: 'shipped',
+          out_for_delivery: 'out_for_delivery',
+          delivered: 'delivered'
+        };
+        const waType = changes.payment_status === 'verified' ? 'payment_verified' : typeMap[changes.order_status];
+        if (waType) {
+          const rows = await sql`SELECT * FROM orders WHERE id=${args[0]} LIMIT 1`;
+          if (rows[0]) {
+            const ord = mapRowToOrder(rows[0]);
+            const settings = await store.getStoreSettings().catch(() => ({}));
+            const crm = resolveCrmConfig(settings);
+            if (crm.configured && crm.autoSendOnStatusChange && (ord.customer_whatsapp || ord.customer_phone)) {
+              const text = buildServerOrderWhatsAppMessage(waType, ord, settings);
+              const dispatch = deps?.dispatchWhatsApp || dispatchWhatsAppViaCrm;
+              await dispatch(sql, {
+                recipient: ord.customer_whatsapp || ord.customer_phone,
+                text,
+                type: waType,
+                orderId: ord.id,
+                orderNumber: ord.order_number,
+                settings
+              });
+            }
+          }
+        }
+      } catch {}
+    }
     return true;
   }
 
@@ -333,7 +389,7 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
     const safeOrderId = typeof order.id === 'string' && /^[a-zA-Z0-9_-]{4,80}$/.test(order.id)
       ? order.id
       : `ord-${randomBytes(8).toString('hex')}`;
-    return saveOrder(sql, {
+    const saved = await saveOrder(sql, {
       ...order,
       id: safeOrderId,
       order_number: safeOrderNumber,
@@ -342,6 +398,34 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
       payment_status: 'unpaid',
       order_status: 'pending'
     });
+    if (saved && (!deps || deps.dispatchWhatsApp)) {
+      try {
+        const settings = await store.getStoreSettings().catch(() => ({}));
+        const crm = resolveCrmConfig(settings);
+        const recipient = order.customer_whatsapp || phone;
+        if (crm.configured && crm.autoSendOnOrder && recipient) {
+          const fullOrder = {
+            ...order,
+            id: safeOrderId,
+            order_number: safeOrderNumber,
+            customer_phone: phone,
+            payment_status: 'unpaid',
+            order_status: 'pending'
+          };
+          const text = buildServerOrderWhatsAppMessage('order_confirmed', fullOrder, settings);
+          const dispatch = deps?.dispatchWhatsApp || dispatchWhatsAppViaCrm;
+          await dispatch(sql, {
+            recipient,
+            text,
+            type: 'order_confirmed',
+            orderId: safeOrderId,
+            orderNumber: safeOrderNumber,
+            settings
+          });
+        }
+      } catch {}
+    }
+    return saved;
   }
 
   if (method === 'submitProductReview') {

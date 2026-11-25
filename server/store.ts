@@ -1,7 +1,15 @@
 import { neon } from '@neondatabase/serverless';
 import { cancelOrder as cancelStoredOrder } from './orderWrites.js';
 import { decodeDeliveryNotes } from '../src/utils/deliveryAddress.js';
-import type { Product, Order, OrderStatus, PaymentMethod, PaymentStatus, StoreCollection } from '../src/types.js';
+import {
+  buildServerOrderWhatsAppMessage,
+  dispatchWhatsAppViaCrm,
+  ensureWhatsAppNotificationsTable,
+  resolveCrmConfig,
+  testWhatsAppCrmConnection,
+  DEFAULT_WHATSAPP_TEMPLATES
+} from './whatsappCrm.js';
+import type { Product, Order, OrderStatus, PaymentMethod, PaymentStatus, StoreCollection, WhatsAppNotificationType } from '../src/types.js';
 
 const queryClient = () => neon(process.env.DATABASE_URL || '');
 const sql: any = Object.assign((strings: any, ...values: any[]) => queryClient()(strings, ...values), {
@@ -472,6 +480,23 @@ export const neonDb = {
         WHERE id = ${orderId} OR order_number = ${orderId};
       `;
       await logAudit({ actorId: options?.actor?.id, actorName: options?.actor?.name, action: 'ORDER_PACKED_AND_SHIPPED', entity: 'order', entityId: orderId, reason: options?.reason });
+      const updatedRows = await sql`SELECT * FROM orders WHERE id = ${orderId} OR order_number = ${orderId} LIMIT 1;`;
+      if (updatedRows[0]) {
+        const orderObj = mapRowToOrder(updatedRows[0]);
+        const settings = await this.getStoreSettings();
+        const crm = resolveCrmConfig(settings);
+        if (crm.configured && crm.autoSendOnStatusChange && (orderObj.customer_whatsapp || orderObj.customer_phone)) {
+          const text = buildServerOrderWhatsAppMessage('shipped', orderObj, settings);
+          await dispatchWhatsAppViaCrm(sql, {
+            recipient: orderObj.customer_whatsapp || orderObj.customer_phone,
+            text,
+            type: 'shipped',
+            orderId: orderObj.id,
+            orderNumber: orderObj.order_number,
+            settings
+          });
+        }
+      }
       return { success: true };
     } catch (err: any) { return { success: false, error: err.message }; }
   },
@@ -482,6 +507,33 @@ export const neonDb = {
       if (!rows.length) return { success: false, error: 'الطلب غير موجود.' };
       await sql`UPDATE orders SET status = ${status}, courier_name = COALESCE(${options?.courierName || null}, courier_name), updated_at = NOW() WHERE id = ${orderId} OR order_number = ${orderId};`;
       await logAudit({ actorId: options?.actor?.id, actorName: options?.actor?.name, action: 'ORDER_STATUS_CHANGED', entity: 'order', entityId: orderId, before: { status: rows[0].status }, after: { status }, reason: options?.overrideReason });
+      const notifMap: Record<string, WhatsAppNotificationType> = {
+        confirmed: 'order_confirmed',
+        shipped: 'shipped',
+        out_for_delivery: 'out_for_delivery',
+        delivered: 'delivered',
+        cancelled: 'cancelled'
+      };
+      const waType = notifMap[status];
+      if (waType) {
+        const updatedRows = await sql`SELECT * FROM orders WHERE id = ${orderId} OR order_number = ${orderId} LIMIT 1;`;
+        if (updatedRows[0]) {
+          const orderObj = mapRowToOrder(updatedRows[0]);
+          const settings = await this.getStoreSettings();
+          const crm = resolveCrmConfig(settings);
+          if (crm.configured && crm.autoSendOnStatusChange && (orderObj.customer_whatsapp || orderObj.customer_phone)) {
+            const text = buildServerOrderWhatsAppMessage(waType, orderObj, settings);
+            await dispatchWhatsAppViaCrm(sql, {
+              recipient: orderObj.customer_whatsapp || orderObj.customer_phone,
+              text,
+              type: waType,
+              orderId: orderObj.id,
+              orderNumber: orderObj.order_number,
+              settings
+            });
+          }
+        }
+      }
       return { success: true };
     } catch (err: any) { return { success: false, error: err.message }; }
   },
@@ -773,5 +825,89 @@ export const neonDb = {
       `;
       return { success: true, entry: rows[0] };
     } catch (error: any) { return { success: false, error: error.message }; }
+  },
+
+  // WhatsApp CRM Automation & Notification Logs
+  async getWhatsAppAdminConfig() {
+    const settings = (await this.getStoreSettings()) || {};
+    const crm = resolveCrmConfig(settings);
+    return {
+      whatsapp_automation_url: settings.whatsapp_automation_url || crm.baseUrl || '',
+      whatsapp_automation_email: settings.whatsapp_automation_email || crm.email || '',
+      has_saved_password: Boolean(settings.whatsapp_automation_pass),
+      using_env_fallback: !settings.whatsapp_automation_url || !settings.whatsapp_automation_email || !settings.whatsapp_automation_pass,
+      env_configured: Boolean(process.env.WHATSAPP_CRM_URL && process.env.WHATSAPP_CRM_EMAIL && process.env.WHATSAPP_CRM_PASSWORD),
+      auto_send_on_order: crm.autoSendOnOrder,
+      auto_send_on_status_change: crm.autoSendOnStatusChange,
+      whatsapp_number: settings.whatsapp_number || '201003732029',
+      whatsapp_templates: { ...DEFAULT_WHATSAPP_TEMPLATES, ...(settings.whatsapp_templates || {}) }
+    };
+  },
+
+  async saveWhatsAppAdminConfig(config: {
+    whatsapp_automation_url?: string;
+    whatsapp_automation_email?: string;
+    whatsapp_automation_pass?: string;
+    auto_send_on_order?: boolean;
+    auto_send_on_status_change?: boolean;
+    whatsapp_templates?: Record<string, string>;
+  }) {
+    const current = (await this.getStoreSettings()) || {};
+    const merged: any = {
+      ...current,
+      auto_send_on_order: config.auto_send_on_order ?? current.auto_send_on_order ?? true,
+      auto_send_on_status_change: config.auto_send_on_status_change ?? current.auto_send_on_status_change ?? true
+    };
+    if (typeof config.whatsapp_automation_url === 'string') merged.whatsapp_automation_url = config.whatsapp_automation_url.trim();
+    if (typeof config.whatsapp_automation_email === 'string') merged.whatsapp_automation_email = config.whatsapp_automation_email.trim();
+    if (typeof config.whatsapp_automation_pass === 'string' && config.whatsapp_automation_pass.trim()) {
+      merged.whatsapp_automation_pass = config.whatsapp_automation_pass.trim();
+    }
+    if (config.whatsapp_templates && typeof config.whatsapp_templates === 'object') {
+      merged.whatsapp_templates = { ...(current.whatsapp_templates || {}), ...config.whatsapp_templates };
+    }
+    return this.updateStoreSettings(merged);
+  },
+
+  async testWhatsAppConnection() {
+    const settings = (await this.getStoreSettings()) || {};
+    return testWhatsAppCrmConnection(settings);
+  },
+
+  async getWhatsAppNotifications(limit = 80) {
+    try {
+      await ensureWhatsAppNotificationsTable(sql);
+      const safeLimit = Math.max(1, Math.min(200, Number(limit) || 80));
+      return await sql`SELECT * FROM whatsapp_notifications ORDER BY created_at DESC LIMIT ${safeLimit};`;
+    } catch {
+      return [];
+    }
+  },
+
+  async sendOrderWhatsApp(orderId: string, type: WhatsAppNotificationType = 'custom', customText?: string, recipientOverride?: string) {
+    const rows = await sql`SELECT * FROM orders WHERE id = ${orderId} OR order_number = ${orderId} LIMIT 1;`;
+    if (!rows[0]) return { success: false, error: 'الطلب غير موجود.' };
+    const orderObj = mapRowToOrder(rows[0]);
+    const settings = (await this.getStoreSettings()) || {};
+    const recipient = recipientOverride || orderObj.customer_whatsapp || orderObj.customer_phone;
+    const text = buildServerOrderWhatsAppMessage(type, orderObj, settings, customText);
+    return dispatchWhatsAppViaCrm(sql, {
+      recipient,
+      text,
+      type,
+      orderId: orderObj.id,
+      orderNumber: orderObj.order_number,
+      settings
+    });
+  },
+
+  async sendTestWhatsApp(phone: string, text: string) {
+    const settings = (await this.getStoreSettings()) || {};
+    return dispatchWhatsAppViaCrm(sql, {
+      recipient: phone,
+      text: text?.trim() || '✨ رسالة اختبارية من لوحة تحكم قمر للعطور (Qamar Fragrances)',
+      type: 'custom',
+      settings
+    });
   }
 };

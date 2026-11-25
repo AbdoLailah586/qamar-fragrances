@@ -120,8 +120,42 @@ export interface Order {
   cancellation_reason?: string;
   cancelled_by?: string;
   cancelled_at?: string;
+  whatsapp_notification_sent?: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export type WhatsAppNotificationType =
+  | 'order_confirmed'
+  | 'payment_verified'
+  | 'shipped'
+  | 'out_for_delivery'
+  | 'delivered'
+  | 'cancelled'
+  | 'review_request'
+  | 'custom';
+
+export interface WhatsAppTemplates {
+  order_confirmed?: string;
+  payment_verified?: string;
+  shipped?: string;
+  out_for_delivery?: string;
+  delivered?: string;
+  cancelled?: string;
+  review_request?: string;
+}
+
+export interface WhatsAppNotificationLog {
+  id: string;
+  order_id?: string;
+  order_number?: string;
+  phone: string;
+  notification_type: WhatsAppNotificationType;
+  message_text: string;
+  status: 'sent' | 'failed' | 'pending';
+  error_message?: string;
+  sender_email?: string;
+  created_at: string;
 }
 
 export interface StoreSettings {
@@ -148,6 +182,12 @@ export interface StoreSettings {
   featured_heading: string;
   announcement_enabled: boolean;
   announcement_text: string;
+  auto_send_on_order?: boolean;
+  auto_send_on_status_change?: boolean;
+  whatsapp_templates?: WhatsAppTemplates;
+  whatsapp_automation_url?: string;
+  whatsapp_automation_email?: string;
+  whatsapp_automation_pass?: string;
 }
 
 export interface OilReserve {

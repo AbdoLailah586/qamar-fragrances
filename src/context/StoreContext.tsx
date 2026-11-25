@@ -127,6 +127,7 @@ interface StoreContextType {
   createOrder: (orderData: any) => Promise<Order>;
   cancelOrder: (orderId: string, reason: string, by?: 'customer_whatsapp' | 'admin') => Promise<boolean>;
   updateOrderStatus: (orderId: string, status: string) => Promise<void>;
+  refreshOrders: () => Promise<void>;
   activeCarts: any[];
   refreshActiveCarts: () => Promise<void>;
 
@@ -493,6 +494,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       createOrder,
       cancelOrder,
       updateOrderStatus,
+      refreshOrders: async () => { setOrders(await neonDb.getOrders()); },
       activeCarts,
       refreshActiveCarts: async () => { setActiveCarts(await neonDb.getActiveCarts()); },
       currentTab,

@@ -40,6 +40,7 @@ const googleAuthApi = await import(pathToFileURL(resolve(ROOT, 'api/google-auth.
 const arabic = await import(pathToFileURL(resolve(ROOT, 'src/utils/arabicNumbers.ts')).href);
 const delivery = await import(pathToFileURL(resolve(ROOT, 'src/utils/deliveryAddress.ts')).href);
 const storeApi = await import(pathToFileURL(resolve(ROOT, 'api/store.ts')).href);
+const whatsappCrm = await import(pathToFileURL(resolve(ROOT, 'server/whatsappCrm.ts')).href);
 
 function createMockRes() {
   const headers = {};
@@ -378,5 +379,141 @@ describe('Google Sign-In Verification & Session Policy', () => {
     assert.equal(seenRole, 'admin');
     assert.equal(okRes.body.success, true);
     assert.equal(okRes.body.user.role, 'admin');
+  });
+});
+
+describe('WhatsApp CRM Automation & Security Boundary', () => {
+  test('GET getStoreSettings strips CRM URL/email/password secrets while preserving public flags', async () => {
+    const mockStore = {
+      async getStoreSettings() {
+        return {
+          whatsapp_number: '201003732029',
+          shipping_fee: 60,
+          auto_send_on_order: true,
+          whatsapp_automation_url: 'https://crm.example',
+          whatsapp_automation_email: 'secret@crm.pro',
+          whatsapp_automation_pass: 'super-secret'
+        };
+      }
+    };
+    const req = createMockReq({ method: 'GET', query: { method: 'getStoreSettings' } });
+    const res = createMockRes();
+    await storeApi.default(req, res, { sql: async () => [], store: mockStore });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.result.whatsapp_number, '201003732029');
+    assert.equal(res.body.result.auto_send_on_order, true);
+    assert.equal(res.body.result.whatsapp_automation_url, undefined);
+    assert.equal(res.body.result.whatsapp_automation_email, undefined);
+    assert.equal(res.body.result.whatsapp_automation_pass, undefined);
+  });
+
+  test('WhatsApp CRM admin RPCs reject unauthenticated callers with 403', async () => {
+    for (const method of ['getWhatsAppAdminConfig', 'saveWhatsAppAdminConfig', 'testWhatsAppConnection', 'getWhatsAppNotifications', 'sendOrderWhatsApp', 'sendTestWhatsApp']) {
+      const req = createMockReq({
+        method: 'POST',
+        headers: { origin: 'https://qamar-fragrances.com' },
+        body: { method, args: [{}] }
+      });
+      const res = createMockRes();
+      await storeApi.default(req, res, { sql: async () => [], store: {}, user: null });
+      assert.equal(res.statusCode, 403, `Expected 403 for ${method}`);
+    }
+  });
+
+  test('whatsappCrm builds Qamar fragrance templates and dispatches via CRM + logs in DB', async () => {
+    assert.equal(whatsappCrm.formatWhatsAppPhone('٠١٠١٢٣٤٥٦٧٨'), '201012345678');
+
+    const msg = whatsappCrm.buildServerOrderWhatsAppMessage('order_confirmed', {
+      order_number: 'QMR-2026-101',
+      customer_name: 'سارة',
+      governorate: 'القاهرة',
+      address_details: 'مدينة نصر',
+      shipping_fee: 60,
+      total: 410,
+      payment_method: 'cod',
+      items: [{ product: { name_ar: 'عطر سوفاج', price: 350 }, selectedSize: '50ml', quantity: 1, unitPrice: 350 }]
+    });
+    assert.match(msg, /QMR-2026-101/);
+    assert.match(msg, /50ml/);
+    assert.match(msg, /410/);
+
+    const calls = [];
+    let insertedLog = false;
+    const fakeSql = Object.assign(async () => { insertedLog = true; return []; }, { query: async () => [] });
+    const mockFetch = async (url, opts) => {
+      calls.push({ url, body: JSON.parse(opts.body) });
+      if (url.endsWith('/api/auth/login')) {
+        return { ok: true, json: async () => ({ token: 'jwt-123' }) };
+      }
+      return { ok: true, json: async () => ({ ok: true }) };
+    };
+
+    const res = await whatsappCrm.dispatchWhatsAppViaCrm(fakeSql, {
+      recipient: '01012345678',
+      text: msg,
+      type: 'order_confirmed',
+      orderId: 'ord-1',
+      orderNumber: 'QMR-2026-101',
+      settings: {
+        whatsapp_automation_url: 'https://crm.example',
+        whatsapp_automation_email: 'bot@crm.pro',
+        whatsapp_automation_pass: 'secret'
+      }
+    }, mockFetch);
+
+    assert.equal(res.success, true);
+    assert.equal(res.status, 'sent');
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].url, 'https://crm.example/api/auth/login');
+    assert.equal(calls[1].url, 'https://crm.example/api/send');
+    assert.equal(calls[1].body.to, '201012345678');
+    assert.equal(insertedLog, true);
+  });
+
+  test('POST createOrder auto-dispatches order_confirmed WhatsApp when configured', async () => {
+    const dispatched = [];
+    const fakeSql = Object.assign(async () => [], {
+      query: async (_q, params) => [{ id: JSON.parse(params[0]).id }]
+    });
+    const req = createMockReq({
+      method: 'POST',
+      headers: { origin: 'https://qamar-fragrances.com' },
+      body: {
+        method: 'createOrder',
+        args: [{
+          customer_name: 'محمد قمر',
+          customer_phone: '01012345678',
+          governorate: 'القاهرة',
+          address_details: 'شارع عباس العقاد',
+          subtotal: 350,
+          shipping_fee: 60,
+          total: 410,
+          payment_method: 'cod',
+          items: [{ product: { id: 'p-1', name_ar: 'عطر قمر', price: 350 }, selectedSize: '50ml', quantity: 1, unitPrice: 350 }]
+        }]
+      }
+    });
+    const res = createMockRes();
+    await storeApi.default(req, res, {
+      sql: fakeSql,
+      store: {
+        async getStoreSettings() {
+          return {
+            auto_send_on_order: true,
+            whatsapp_automation_url: 'https://crm.example',
+            whatsapp_automation_email: 'bot@crm.pro',
+            whatsapp_automation_pass: 'secret'
+          };
+        }
+      },
+      user: null,
+      dispatchWhatsApp: async (_sql, payload) => { dispatched.push(payload); return { success: true }; }
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(dispatched.length, 1);
+    assert.equal(dispatched[0].type, 'order_confirmed');
+    assert.equal(dispatched[0].recipient, '01012345678');
   });
 });

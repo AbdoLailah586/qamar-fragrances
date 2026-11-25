@@ -252,5 +252,17 @@ export const neonDb = {
   },
   async upsertFragranceNotes(entry: Partial<FragranceNotesEntry>) {
     return callAction('upsertFragranceNotes', [entry]);
+  },
+
+  // WhatsApp Automation & CRM RPCs
+  async getWhatsAppAdminConfig() { return callStore('getWhatsAppAdminConfig', []); },
+  async saveWhatsAppAdminConfig(config: any) { return callAction('saveWhatsAppAdminConfig', [config]); },
+  async testWhatsAppConnection() { return callAction('testWhatsAppConnection', []); },
+  async getWhatsAppNotifications(limit = 80) { return callStore('getWhatsAppNotifications', [limit]); },
+  async sendOrderWhatsApp(orderId: string, type: string, customText?: string, recipientOverride?: string) {
+    return callAction('sendOrderWhatsApp', [orderId, type, customText, recipientOverride]);
+  },
+  async sendTestWhatsApp(phone: string, text: string) {
+    return callAction('sendTestWhatsApp', [phone, text]);
   }
 };
