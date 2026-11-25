@@ -10,6 +10,8 @@ build/
 Thumbs.db
 npm-debug.log*
 scripts/loadtest/summary*.json
-backups/
-data/
+/backups/
+/data/
+*credentials*.json
+*secret*.json
 *.log
