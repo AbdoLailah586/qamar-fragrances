@@ -473,27 +473,49 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
       try {
         const settings = await store.getStoreSettings().catch(() => ({}));
         const crm = resolveCrmConfig(settings);
-        const recipient = order.customer_whatsapp || phone;
-        if (crm.configured && crm.autoSendOnOrder && recipient) {
-          const fullOrder = {
-            ...order,
-            id: safeOrderId,
-            order_number: safeOrderNumber,
-            customer_phone: phone,
-            payment_status: 'unpaid',
-            order_status: 'pending'
-          };
-          const text = buildServerOrderWhatsAppMessage('order_confirmed', fullOrder, settings);
-          const dispatch = deps?.dispatchWhatsApp || dispatchWhatsAppViaCrm;
-          await dispatch(sql, {
-            recipient,
-            text,
-            type: 'order_confirmed',
-            orderId: safeOrderId,
-            orderNumber: safeOrderNumber,
-            settings
-          });
+        const dispatch = deps?.dispatchWhatsApp || dispatchWhatsAppViaCrm;
+        const fullOrder = {
+          ...order,
+          id: safeOrderId,
+          order_number: safeOrderNumber,
+          customer_phone: phone,
+          customer_email: user?.email || order.customer_email || undefined,
+          payment_status: 'unpaid',
+          order_status: 'pending'
+        };
+
+        const customerRecipient = order.customer_whatsapp || phone;
+        const adminRecipients = crm.autoAlertAdminOnOrder ? crm.adminAlertRecipients : [];
+
+        const jobs: Promise<any>[] = [];
+        if (crm.configured && crm.autoSendOnOrder && customerRecipient) {
+          jobs.push(
+            dispatch(sql, {
+              recipient: customerRecipient,
+              text: buildServerOrderWhatsAppMessage('order_confirmed', fullOrder, settings),
+              type: 'order_confirmed',
+              orderId: safeOrderId,
+              orderNumber: safeOrderNumber,
+              settings
+            })
+          );
         }
+        if (crm.configured && adminRecipients.length > 0) {
+          const adminText = buildServerOrderWhatsAppMessage('admin_new_order', fullOrder, settings);
+          for (const adminPhone of adminRecipients) {
+            jobs.push(
+              dispatch(sql, {
+                recipient: adminPhone,
+                text: adminText,
+                type: 'admin_new_order',
+                orderId: safeOrderId,
+                orderNumber: safeOrderNumber,
+                settings
+              })
+            );
+          }
+        }
+        if (jobs.length > 0) await Promise.allSettled(jobs);
       } catch {}
     }
     return saved;

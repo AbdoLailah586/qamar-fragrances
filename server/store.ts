@@ -1064,6 +1064,8 @@ export const neonDb = {
       env_configured: Boolean(process.env.WHATSAPP_CRM_URL && process.env.WHATSAPP_CRM_EMAIL && process.env.WHATSAPP_CRM_PASSWORD),
       auto_send_on_order: crm.autoSendOnOrder,
       auto_send_on_status_change: crm.autoSendOnStatusChange,
+      auto_alert_admin_on_order: crm.autoAlertAdminOnOrder,
+      admin_alert_whatsapp_number: settings.admin_alert_whatsapp_number || settings.whatsapp_number || '201003732029',
       whatsapp_number: settings.whatsapp_number || '201003732029',
       whatsapp_templates: { ...DEFAULT_WHATSAPP_TEMPLATES, ...(settings.whatsapp_templates || {}) }
     };
@@ -1075,14 +1077,20 @@ export const neonDb = {
     whatsapp_automation_pass?: string;
     auto_send_on_order?: boolean;
     auto_send_on_status_change?: boolean;
+    auto_alert_admin_on_order?: boolean;
+    admin_alert_whatsapp_number?: string;
     whatsapp_templates?: Record<string, string>;
   }) {
     const current = (await this.getStoreSettings()) || {};
     const merged: any = {
       ...current,
       auto_send_on_order: config.auto_send_on_order ?? current.auto_send_on_order ?? true,
-      auto_send_on_status_change: config.auto_send_on_status_change ?? current.auto_send_on_status_change ?? true
+      auto_send_on_status_change: config.auto_send_on_status_change ?? current.auto_send_on_status_change ?? true,
+      auto_alert_admin_on_order: config.auto_alert_admin_on_order ?? current.auto_alert_admin_on_order ?? true
     };
+    if (typeof config.admin_alert_whatsapp_number === 'string') {
+      merged.admin_alert_whatsapp_number = config.admin_alert_whatsapp_number.trim();
+    }
     if (typeof config.whatsapp_automation_url === 'string') merged.whatsapp_automation_url = config.whatsapp_automation_url.trim();
     if (typeof config.whatsapp_automation_email === 'string') merged.whatsapp_automation_email = config.whatsapp_automation_email.trim();
     if (typeof config.whatsapp_automation_pass === 'string' && config.whatsapp_automation_pass.trim()) {

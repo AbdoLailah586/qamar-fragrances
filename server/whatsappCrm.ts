@@ -17,6 +17,24 @@ export const DEFAULT_WHATSAPP_TEMPLATES: Required<WhatsAppTemplates> = {
     ``,
     `سيصلك إشعار فور شحن الطلب مع المندوب. شرفنا تواصلك!`
   ].join('\n'),
+  admin_new_order: [
+    `🔔 *طلب جديد وصل الآن — قمر للعطور (Qamar Fragrances)*`,
+    ``,
+    `🔖 رقم الطلب: *#{order_number}*`,
+    `👤 العميل: *{customer_name}*`,
+    `📞 الهاتف: {customer_phone}`,
+    `💬 واتساب العميل: {customer_whatsapp}`,
+    `📍 العنوان ({governorate}): {address}`,
+    ``,
+    `🛍️ *تفاصيل العطور:*`,
+    `{items}`,
+    ``,
+    `🚚 الشحن: *{shipping_fee} ج.م.* | 💰 *الإجمالي:* *{total} ج.م.*`,
+    `💳 طريقة الدفع المختارة: *{payment_method}*`,
+    ``,
+    `⏳ *تواصل الآن مع العميل لتأكيد الطلب وطريقة الدفع:*`,
+    `{customer_wa_link}`
+  ].join('\n'),
   payment_verified: [
     `*تم تأكيد الدفع بنجاح - قمر للعطور* 💳✅`,
     ``,
@@ -110,24 +128,51 @@ export function buildServerOrderWhatsAppMessage(
 
   const address = [order.governorate, order.city, order.address_details].filter(Boolean).join(' - ');
   const mapsUrl = typeof order.google_maps_url === 'string' ? order.google_maps_url.trim() : '';
+  const customerPhone = String(order.customer_phone || '');
+  const customerWhatsapp = String(order.customer_whatsapp || customerPhone || '');
+  const customerWaPhone = formatWhatsAppPhone(customerWhatsapp);
+  const customerConfirmDraft = `أهلاً بك يا ${order.customer_name || 'عميلنا العزيز'} من قمر للعطور ✨\nبخصوص طلبك رقم *#${order.order_number || order.id || ''}* بإجمالي *${Math.round(Number(order.total || 0))} ج.م.* (${paymentLabel}).\nنرجو تأكيد بيانات الطلب وطريقة الدفع لتجهيز طلبك وشحنه فوراً.`;
+  const customerWaLink = customerWaPhone
+    ? `https://wa.me/${customerWaPhone}?text=${encodeURIComponent(customerConfirmDraft)}`
+    : '';
 
-  const rendered = renderTemplate(template, {
+  let rendered = renderTemplate(template, {
     customer_name: order.customer_name || 'عميلنا العزيز',
+    customer_phone: customerPhone,
+    customer_whatsapp: customerWhatsapp,
+    customer_email: String(order.customer_email || ''),
+    customer_wa_link: customerWaLink,
     order_number: order.order_number || order.id || '',
     items: itemsText || 'منتجات متجر قمر للعطور',
     shipping_fee: String(Math.round(Number(order.shipping_fee || 0))),
     subtotal: String(Math.round(Number(order.subtotal || 0))),
     total: String(Math.round(Number(order.total || 0))),
     payment_method: paymentLabel,
+    payment_reference: String(order.payment_reference || ''),
     cod_due: codDue,
     governorate: order.governorate || '',
     address: address || order.governorate || '',
     maps_url: mapsUrl,
+    notes: String(order.notes || ''),
     courier_name: order.courier_name || 'مندوب شحن قمر للعطور'
   });
 
-  if (!customText && mapsUrl && (type === 'order_confirmed' || type === 'shipped') && !rendered.includes(mapsUrl)) {
-    return `${rendered}\n🗺️ موقع التوصيل: ${mapsUrl}`;
+  if (!customText) {
+    const extras: string[] = [];
+    if (type === 'admin_new_order') {
+      if (order.payment_reference && !rendered.includes(order.payment_reference)) {
+        extras.push(`🧾 مرجع الدفع: ${order.payment_reference}`);
+      }
+      if (order.notes && !rendered.includes(order.notes)) {
+        extras.push(`📝 ملاحظات العميل: ${order.notes}`);
+      }
+    }
+    if (mapsUrl && (type === 'order_confirmed' || type === 'shipped' || type === 'admin_new_order') && !rendered.includes(mapsUrl)) {
+      extras.push(`🗺️ موقع التوصيل: ${mapsUrl}`);
+    }
+    if (extras.length) {
+      rendered = `${rendered}\n${extras.join('\n')}`;
+    }
   }
   return rendered;
 }
@@ -149,6 +194,21 @@ export async function ensureWhatsAppNotificationsTable(sql: any) {
   `);
 }
 
+export function resolveAdminAlertRecipients(settings?: any): string[] {
+  const raw = String(
+    (typeof settings?.admin_alert_whatsapp_number === 'string' && settings.admin_alert_whatsapp_number.trim()) ||
+      process.env.ADMIN_ALERT_WHATSAPP ||
+      settings?.whatsapp_number ||
+      ''
+  ).trim();
+  if (!raw) return [];
+  const list = raw
+    .split(/[,;\n]+/)
+    .map(p => formatWhatsAppPhone(p))
+    .filter(p => p.length >= 10);
+  return Array.from(new Set(list));
+}
+
 export function resolveCrmConfig(settings?: any) {
   const baseUrl = String(settings?.whatsapp_automation_url || process.env.WHATSAPP_CRM_URL || '').trim().replace(/\/+$/, '');
   const email = String(settings?.whatsapp_automation_email || process.env.WHATSAPP_CRM_EMAIL || '').trim();
@@ -159,7 +219,9 @@ export function resolveCrmConfig(settings?: any) {
     password,
     configured: Boolean(baseUrl && email && password),
     autoSendOnOrder: settings?.auto_send_on_order !== false,
-    autoSendOnStatusChange: settings?.auto_send_on_status_change !== false
+    autoSendOnStatusChange: settings?.auto_send_on_status_change !== false,
+    autoAlertAdminOnOrder: settings?.auto_alert_admin_on_order !== false,
+    adminAlertRecipients: resolveAdminAlertRecipients(settings)
   };
 }
 

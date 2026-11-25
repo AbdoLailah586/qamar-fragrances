@@ -133,6 +133,7 @@ export interface Order {
 
 export type WhatsAppNotificationType =
   | 'order_confirmed'
+  | 'admin_new_order'
   | 'payment_verified'
   | 'shipped'
   | 'out_for_delivery'
@@ -143,6 +144,7 @@ export type WhatsAppNotificationType =
 
 export interface WhatsAppTemplates {
   order_confirmed?: string;
+  admin_new_order?: string;
   payment_verified?: string;
   shipped?: string;
   out_for_delivery?: string;
@@ -190,6 +192,8 @@ export interface StoreSettings {
   announcement_text: string;
   auto_send_on_order?: boolean;
   auto_send_on_status_change?: boolean;
+  auto_alert_admin_on_order?: boolean;
+  admin_alert_whatsapp_number?: string;
   whatsapp_templates?: WhatsAppTemplates;
   whatsapp_automation_url?: string;
   whatsapp_automation_email?: string;

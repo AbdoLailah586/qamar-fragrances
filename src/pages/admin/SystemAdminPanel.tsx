@@ -11,13 +11,14 @@ import { UsersCrmPanel } from './UsersCrmPanel';
 import type { WhatsAppNotificationLog, WhatsAppTemplates } from '../../types';
 
 const TEMPLATE_LABELS: { key: keyof WhatsAppTemplates; title: string; desc: string }[] = [
-  { key: 'order_confirmed', title: '١. تأكيد استلام الطلب (فوري عند الطلب)', desc: 'يُرسل تلقائياً فور إتمام العميل للطلب.' },
-  { key: 'payment_verified', title: '٢. تأكيد الدفع الإلكتروني', desc: 'يُرسل تلقائياً عند تأكيد تحويل إنستاباي أو فودافون كاش.' },
-  { key: 'shipped', title: '٣. تم شحن الطلب مع المندوب', desc: 'يُرسل تلقائياً عند التغليف أو تحويل الحالة إلى shipped.' },
-  { key: 'out_for_delivery', title: '٤. الشحنة في طريقها للتسليم اليوم', desc: 'يُرسل عند تحويل الحالة إلى out_for_delivery.' },
-  { key: 'delivered', title: '٥. تم تسليم الطلب بنجاح', desc: 'رسالة تهنئة بعد التسليم.' },
-  { key: 'cancelled', title: '٦. إلغاء الطلب', desc: 'إشعار مهذب عند إلغاء الطلب.' },
-  { key: 'review_request', title: '٧. طلب تقييم العطر ⭐', desc: 'إشعار سريع بعد التسليم لطلب رأي العميل.' }
+  { key: 'admin_new_order', title: '١. تنبيه الأدمن الفوري عند طلب جديد (يُرسل للإدارة)', desc: 'يُرسل تلقائياً لرقم/أرقام الأدمن بكل بيانات العميل والطلب وطريقة الدفع ورابط الشات المباشر لتأكيد الطلب مع العميل.' },
+  { key: 'order_confirmed', title: '٢. تأكيد استلام الطلب (يُرسل للعميل)', desc: 'يُرسل تلقائياً للعميل فور إتمام الطلب.' },
+  { key: 'payment_verified', title: '٣. تأكيد الدفع الإلكتروني', desc: 'يُرسل تلقائياً عند تأكيد تحويل إنستاباي أو فودافون كاش.' },
+  { key: 'shipped', title: '٤. تم شحن الطلب مع المندوب', desc: 'يُرسل تلقائياً عند التغليف أو تحويل الحالة إلى shipped.' },
+  { key: 'out_for_delivery', title: '٥. الشحنة في طريقها للتسليم اليوم', desc: 'يُرسل عند تحويل الحالة إلى out_for_delivery.' },
+  { key: 'delivered', title: '٦. تم تسليم الطلب بنجاح', desc: 'رسالة تهنئة بعد التسليم.' },
+  { key: 'cancelled', title: '٧. إلغاء الطلب', desc: 'إشعار مهذب عند إلغاء الطلب.' },
+  { key: 'review_request', title: '٨. طلب تقييم العطر ⭐', desc: 'إشعار سريع بعد التسليم لطلب رأي العميل.' }
 ];
 
 export const SystemAdminPanel: React.FC<{ section: 'users' | 'security' | 'settings' | 'whatsapp' | 'emails' }> = ({ section }) => {
@@ -37,6 +38,8 @@ export const SystemAdminPanel: React.FC<{ section: 'users' | 'security' | 'setti
   const [envConfigured, setEnvConfigured] = useState(false);
   const [autoOrder, setAutoOrder] = useState(true);
   const [autoStatus, setAutoStatus] = useState(true);
+  const [autoAdminAlert, setAutoAdminAlert] = useState(true);
+  const [adminAlertNumber, setAdminAlertNumber] = useState('201003732029');
   const [templates, setTemplates] = useState<WhatsAppTemplates>({});
   const [waLogs, setWaLogs] = useState<WhatsAppNotificationLog[]>([]);
   const [waStatusBanner, setWaStatusBanner] = useState<{ ok: boolean; text: string } | null>(null);
@@ -57,6 +60,8 @@ export const SystemAdminPanel: React.FC<{ section: 'users' | 'security' | 'setti
         setEnvConfigured(Boolean(cfg.env_configured));
         setAutoOrder(cfg.auto_send_on_order !== false);
         setAutoStatus(cfg.auto_send_on_status_change !== false);
+        setAutoAdminAlert(cfg.auto_alert_admin_on_order !== false);
+        setAdminAlertNumber(cfg.admin_alert_whatsapp_number || cfg.whatsapp_number || '201003732029');
         setTemplates(cfg.whatsapp_templates || {});
       }
       setWaLogs(Array.isArray(notifRows) ? notifRows : []);
@@ -127,6 +132,8 @@ export const SystemAdminPanel: React.FC<{ section: 'users' | 'security' | 'setti
           whatsapp_automation_pass: waPass || undefined,
           auto_send_on_order: autoOrder,
           auto_send_on_status_change: autoStatus,
+          auto_alert_admin_on_order: autoAdminAlert,
+          admin_alert_whatsapp_number: adminAlertNumber,
           whatsapp_templates: templates
         });
         if (res?.success) {
@@ -250,6 +257,21 @@ export const SystemAdminPanel: React.FC<{ section: 'users' | 'security' | 'setti
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <label className="flex items-center gap-2.5 p-3 rounded-xl bg-amber-50 border border-amber-200 cursor-pointer font-bold">
+                <input type="checkbox" checked={autoAdminAlert} onChange={e => setAutoAdminAlert(e.target.checked)} className="accent-[#fe9931] w-4 h-4" />
+                <span>تنبيه فوري للأدمن على الواتساب عند وصول أي طلب جديد</span>
+              </label>
+              <label className="space-y-1 font-bold bg-amber-50/50 border border-amber-200 p-3 rounded-xl">
+                <span>رقم واتساب الأدمن لاستلام تنبيهات الطلبات (يدعم أكثر من رقم مفصولين بفاصلة ,)</span>
+                <input
+                  type="text"
+                  dir="ltr"
+                  value={adminAlertNumber}
+                  onChange={e => setAdminAlertNumber(e.target.value)}
+                  placeholder="01003732029, 01554826209"
+                  className="w-full px-3 py-1.5 border rounded-lg bg-white font-normal"
+                />
+              </label>
               <label className="flex items-center gap-2.5 p-3 rounded-xl bg-gray-50 border cursor-pointer font-bold">
                 <input type="checkbox" checked={autoOrder} onChange={e => setAutoOrder(e.target.checked)} className="accent-[#fe9931] w-4 h-4" />
                 <span>إرسال رسالة تأكيد تلقائياً للعميل فور إتمام الطلب</span>
@@ -267,7 +289,7 @@ export const SystemAdminPanel: React.FC<{ section: 'users' | 'security' | 'setti
               <div>
                 <p className="font-extrabold text-sm text-[#252a31]">قوالب الرسائل الجاهزة لقمر للعطور</p>
                 <p className="text-[11px] text-gray-500 mt-0.5">
-                  المتغيرات المتاحة: <code dir="ltr" className="bg-gray-100 px-1.5 py-0.5 rounded">{'{customer_name} {order_number} {items} {total} {shipping_fee} {payment_method} {governorate} {address} {courier_name} {cod_due}'}</code>
+                  المتغيرات المتاحة: <code dir="ltr" className="bg-gray-100 px-1.5 py-0.5 rounded">{'{customer_name} {customer_phone} {customer_whatsapp} {customer_wa_link} {order_number} {items} {total} {shipping_fee} {payment_method} {governorate} {address} {maps_url} {courier_name} {cod_due}'}</code>
                 </p>
               </div>
               <button

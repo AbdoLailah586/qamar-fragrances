@@ -840,3 +840,81 @@ describe('Admin Users CRM, Insights & Legal Policy Pages', () => {
     assert.match(appSrc, /PolicyPage/);
   });
 });
+
+describe('Admin WhatsApp Alert on New Orders', () => {
+  test('POST createOrder dispatches instant admin_new_order WhatsApp with customer details, payment method, and direct chat link', async () => {
+    const dispatched = [];
+    const fakeSql = Object.assign(async () => [], {
+      query: async (_q, params) => [{ id: JSON.parse(params[0]).id }]
+    });
+    const req = createMockReq({
+      method: 'POST',
+      headers: { origin: 'https://qamar-fragrances.com' },
+      body: {
+        method: 'createOrder',
+        args: [{
+          customer_name: 'أحمد قمر',
+          customer_phone: '01098765432',
+          customer_whatsapp: '01098765432',
+          governorate: 'الدقهلية - المنصورة',
+          city: 'المنصورة',
+          address_details: 'شارع الجمهورية برج النيل',
+          google_maps_url: 'https://www.google.com/maps?q=31.040900,31.378500',
+          subtotal: 350,
+          shipping_fee: 45,
+          total: 395,
+          payment_method: 'instapay',
+          payment_reference: 'IP-9988',
+          notes: 'الاتصال قبل الوصول',
+          items: [{ product: { id: 'p-1', name_ar: 'عطر ميجامير', price: 350 }, selectedSize: '50ml', quantity: 1, unitPrice: 350 }]
+        }]
+      }
+    });
+    const res = createMockRes();
+    await storeApi.default(req, res, {
+      sql: fakeSql,
+      store: {
+        async getStoreSettings() {
+          return {
+            whatsapp_number: '201003732029',
+            admin_alert_whatsapp_number: '01003732029, 01554826209',
+            auto_send_on_order: true,
+            auto_alert_admin_on_order: true,
+            whatsapp_automation_url: 'https://crm.example',
+            whatsapp_automation_email: 'bot@crm.pro',
+            whatsapp_automation_pass: 'secret'
+          };
+        }
+      },
+      user: null,
+      dispatchWhatsApp: async (_sql, payload) => { dispatched.push(payload); return { success: true }; }
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(dispatched.length, 3);
+    assert.equal(dispatched[0].type, 'order_confirmed');
+    assert.equal(dispatched[0].recipient, '01098765432');
+
+    const adminAlerts = dispatched.filter(d => d.type === 'admin_new_order');
+    assert.equal(adminAlerts.length, 2);
+    assert.deepEqual(adminAlerts.map(a => a.recipient), ['201003732029', '201554826209']);
+
+    const body = adminAlerts[0].text;
+    assert.match(body, /أحمد قمر/);
+    assert.match(body, /01098765432/);
+    assert.match(body, /عطر ميجامير/);
+    assert.match(body, /395/);
+    assert.match(body, /إنستاباي InstaPay/);
+    assert.match(body, /IP-9988/);
+    assert.match(body, /https:\/\/wa\.me\/201098765432\?text=/);
+    assert.match(body, /https:\/\/www\.google\.com\/maps\?q=31\.040900,31\.378500/);
+  });
+
+  test('SystemAdminPanel exposes admin order alert toggle, recipient phone input, and admin_new_order template', () => {
+    const sysSrc = readFileSync(resolve(ROOT, 'src/pages/admin/SystemAdminPanel.tsx'), 'utf8');
+    assert.match(sysSrc, /admin_new_order/);
+    assert.match(sysSrc, /auto_alert_admin_on_order/);
+    assert.match(sysSrc, /admin_alert_whatsapp_number/);
+    assert.match(sysSrc, /تنبيه فوري للأدمن على الواتساب عند وصول أي طلب جديد/);
+  });
+});
