@@ -11,7 +11,6 @@ export const Home: React.FC = () => {
   const visibleCollections = collections.slice(0, 6);
   const perView = 4;
   const maxOffset = Math.max(0, visibleCollections.length - perView);
-  const shownCollections = visibleCollections.slice(slideOffset, slideOffset + perView);
 
   // Exact 12 featured products in their exact homepage order
   const featuredProducts = [...products]
@@ -110,29 +109,37 @@ export const Home: React.FC = () => {
           ))}
         </div>
 
-        {/* Laptop Desktop 4-col Grid Carousel */}
-        <div className="hidden md:grid md:grid-cols-4 gap-6">
-          {shownCollections.map((col, idx) => (
-            <button
-              key={col.id}
-              type="button"
-              style={{ animationDelay: `${idx * 70}ms` }}
-              onClick={() => navigate('shop', { category: col.handle, search: '' })}
-              className="qamar-card-reveal group relative rounded-2xl overflow-hidden bg-gray-100 aspect-[4/3] text-right shadow-sm border border-gray-100 hover:-translate-y-1 hover:shadow-lg transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] focus:outline-none"
-            >
-              <img
-                src={col.image}
-                alt={col.title}
-                className="w-full h-full object-cover will-change-transform group-hover:scale-[1.07] transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)]"
-              />
-              <div className="absolute inset-x-3 bottom-3 bg-white/95 backdrop-blur-sm rounded-xl px-3.5 py-2.5 flex items-center justify-between shadow-sm">
-                <span className="text-sm font-bold text-[#252a31] truncate">
-                  {col.title}
-                </span>
-                <ChevronLeft className="w-4 h-4 text-[#252a31] shrink-0 group-hover:-translate-x-1 transition-transform duration-300" />
+        {/* Laptop Desktop 4-col Sliding Track Carousel */}
+        <div className="hidden md:block overflow-hidden">
+          <div
+            className="flex transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform"
+            style={{
+              transform: `translate3d(${slideOffset * 25}%, 0, 0)`,
+            }}
+          >
+            {visibleCollections.map((col, idx) => (
+              <div key={col.id} className="w-1/4 shrink-0 px-3">
+                <button
+                  type="button"
+                  style={{ animationDelay: `${idx * 70}ms` }}
+                  onClick={() => navigate('shop', { category: col.handle, search: '' })}
+                  className="w-full qamar-card-reveal group relative rounded-2xl overflow-hidden bg-gray-100 aspect-[4/3] text-right shadow-sm border border-gray-100 hover:-translate-y-1 hover:shadow-lg transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] focus:outline-none"
+                >
+                  <img
+                    src={col.image}
+                    alt={col.title}
+                    className="w-full h-full object-cover will-change-transform group-hover:scale-[1.07] transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)]"
+                  />
+                  <div className="absolute inset-x-3 bottom-3 bg-white/95 backdrop-blur-sm rounded-xl px-3.5 py-2.5 flex items-center justify-between shadow-sm">
+                    <span className="text-sm font-bold text-[#252a31] truncate">
+                      {col.title}
+                    </span>
+                    <ChevronLeft className="w-4 h-4 text-[#252a31] shrink-0 group-hover:-translate-x-1 transition-transform duration-300" />
+                  </div>
+                </button>
               </div>
-            </button>
-          ))}
+            ))}
+          </div>
         </div>
 
         {/* Desktop Carousel dots & arrows */}

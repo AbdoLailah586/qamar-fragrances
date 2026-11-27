@@ -77,6 +77,14 @@ export function buildQamarCustomerMessage(
       `جاري الآن تجهيز وتغليف عطورك لتسليمها لشركة الشحن.`
     ].join('\n');
   }
+  if (type === 'processing') {
+    return [
+      `*تم تجهيز طلبك وجاري تسليمه لشركة الشحن - قمر للعطور* 📦✨`,
+      ``,
+      `عزيزنا *${order.customer_name}*،`,
+      `تم الانتهاء من تجهيز وتغليف عطور طلبك رقم *#${order.order_number}* بنجاح، وجاري الآن تسليمه لشركة الشحن.`
+    ].join('\n');
+  }
   if (type === 'shipped') {
     return [
       `*شحنتك في الطريق إليك - قمر للعطور* 🚚✨`,

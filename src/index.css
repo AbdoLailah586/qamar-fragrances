@@ -215,8 +215,10 @@ a {
   .qamar-fade-in,
   .qamar-slide-left,
   .qamar-float-soft,
+  .qamar-gallery-slide,
   .qamar-cta-shimmer::after {
     animation: none !important;
+    transition: none !important;
   }
 }
 

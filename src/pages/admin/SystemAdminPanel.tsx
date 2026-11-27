@@ -10,17 +10,77 @@ import { whatsappUrl } from '../../utils/whatsappService';
 import { UsersCrmPanel } from './UsersCrmPanel';
 import { MarketingAdToolsCard } from './MarketingAdToolsCard';
 import { PaymentGatewaySettingsCard } from './PaymentGatewaySettingsCard';
-import type { WhatsAppNotificationLog, WhatsAppTemplates } from '../../types';
+import { PolicyPagesEditorCard } from './PolicyPagesEditorCard';
+import type { PolicyPagesConfig, WhatsAppAutoTriggers, WhatsAppNotificationLog, WhatsAppTemplates } from '../../types';
+
+const AUTO_TRIGGER_OPTIONS: Array<{
+  key: keyof WhatsAppAutoTriggers;
+  title: string;
+  desc: string;
+}> = [
+  {
+    key: 'admin_new_order',
+    title: 'تنبيه فوري للأدمن على الواتساب عند وصول أي طلب جديد',
+    desc: 'يرسل رسالة فورية لأرقام الإدارة فور تسجيل طلب جديد.'
+  },
+  {
+    key: 'order_confirmed',
+    title: 'تأكيد الأوردر للعميل (Confirm Order)',
+    desc: 'يرسل للعميل رسالة تأكيد استلام/اعتماد الطلب.'
+  },
+  {
+    key: 'payment_verified',
+    title: 'تأكيد الدفع للعميل (Payment Confirmed)',
+    desc: 'يرسل للعميل رسالة تأكيد الدفع عند مراجعته أو سداده.'
+  },
+  {
+    key: 'processing',
+    title: 'تسليم الطلب لشركة الشحن (Processing)',
+    desc: 'يرسل للعميل عند تجهيز المحل للطلب وتحويله لشركة الشحن.'
+  },
+  {
+    key: 'shipped',
+    title: 'تم شحن الطلب مع الشركة (Shipped)',
+    desc: 'يرسل للعميل عند تأكيد شحن الأوردر مع شركة الشحن.'
+  },
+  {
+    key: 'out_for_delivery',
+    title: 'خرج للتوصيل اليوم (Out for Delivery)',
+    desc: 'يرسل للعميل عند خروج الشحنة مع المندوب اليوم.'
+  },
+  {
+    key: 'delivered',
+    title: 'تم التوصيل بنجاح (Delivered)',
+    desc: 'يرسل للعميل رسالة التهنئة بعد تسليم الطلب.'
+  },
+  {
+    key: 'cancelled',
+    title: 'إلغاء الطلب (Cancelled)',
+    desc: 'يرسل للعميل إشعاراً عند إلغاء الطلب.'
+  }
+];
+
+const DEFAULT_TRIGGERS_STATE: WhatsAppAutoTriggers = {
+  admin_new_order: false,
+  order_confirmed: false,
+  payment_verified: false,
+  processing: false,
+  shipped: false,
+  out_for_delivery: false,
+  delivered: false,
+  cancelled: false,
+};
 
 const TEMPLATE_LABELS: { key: keyof WhatsAppTemplates; title: string; desc: string }[] = [
-  { key: 'admin_new_order', title: '١. تنبيه الأدمن الفوري عند طلب جديد (يُرسل للإدارة)', desc: 'يُرسل تلقائياً لرقم/أرقام الأدمن بكل بيانات العميل والطلب وطريقة الدفع ورابط الشات المباشر لتأكيد الطلب مع العميل.' },
-  { key: 'order_confirmed', title: '٢. تأكيد استلام الطلب (يُرسل للعميل)', desc: 'يُرسل تلقائياً للعميل فور إتمام الطلب.' },
-  { key: 'payment_verified', title: '٣. تأكيد الدفع الإلكتروني', desc: 'يُرسل تلقائياً عند تأكيد تحويل إنستاباي أو فودافون كاش.' },
-  { key: 'shipped', title: '٤. تم شحن الطلب مع المندوب', desc: 'يُرسل تلقائياً عند التغليف أو تحويل الحالة إلى shipped.' },
-  { key: 'out_for_delivery', title: '٥. الشحنة في طريقها للتسليم اليوم', desc: 'يُرسل عند تحويل الحالة إلى out_for_delivery.' },
-  { key: 'delivered', title: '٦. تم تسليم الطلب بنجاح', desc: 'رسالة تهنئة بعد التسليم.' },
-  { key: 'cancelled', title: '٧. إلغاء الطلب', desc: 'إشعار مهذب عند إلغاء الطلب.' },
-  { key: 'review_request', title: '٨. طلب تقييم العطر ⭐', desc: 'إشعار سريع بعد التسليم لطلب رأي العميل.' }
+  { key: 'admin_new_order', title: '١. تنبيه الأدمن الفوري عند طلب جديد (يُرسل للإدارة)', desc: 'يُرسل لرقم/أرقام الأدمن بكل بيانات العميل والطلب وطريقة الدفع ورابط الشات المباشر لتأكيد الطلب مع العميل.' },
+  { key: 'order_confirmed', title: '٢. تأكيد استلام الطلب (يُرسل للعميل)', desc: 'رسالة تأكيد استلام أو اعتماد الطلب للعميل.' },
+  { key: 'payment_verified', title: '٣. تأكيد الدفع الإلكتروني', desc: 'رسالة تأكيد مراجعة أو سداد قيمة الطلب.' },
+  { key: 'processing', title: '٤. تجهيز الطلب وتسليمه لشركة الشحن', desc: 'يُرسل عند تحويل الحالة إلى processing (تسليم لشركة الشحن).' },
+  { key: 'shipped', title: '٥. تم شحن الطلب مع المندوب', desc: 'يُرسل عند التغليف أو تحويل الحالة إلى shipped.' },
+  { key: 'out_for_delivery', title: '٦. الشحنة في طريقها للتسليم اليوم', desc: 'يُرسل عند تحويل الحالة إلى out_for_delivery.' },
+  { key: 'delivered', title: '٧. تم تسليم الطلب بنجاح', desc: 'رسالة تهنئة بعد التسليم.' },
+  { key: 'cancelled', title: '٨. إلغاء الطلب', desc: 'إشعار مهذب عند إلغاء الطلب.' },
+  { key: 'review_request', title: '٩. طلب تقييم العطر ⭐', desc: 'إشعار سريع بعد التسليم لطلب رأي العميل.' }
 ];
 
 export const SystemAdminPanel: React.FC<{ section: 'users' | 'security' | 'settings' | 'whatsapp' | 'emails' }> = ({ section }) => {
@@ -38,9 +98,7 @@ export const SystemAdminPanel: React.FC<{ section: 'users' | 'security' | 'setti
   const [waPass, setWaPass] = useState('');
   const [hasSavedPass, setHasSavedPass] = useState(false);
   const [envConfigured, setEnvConfigured] = useState(false);
-  const [autoOrder, setAutoOrder] = useState(true);
-  const [autoStatus, setAutoStatus] = useState(true);
-  const [autoAdminAlert, setAutoAdminAlert] = useState(true);
+  const [triggers, setTriggers] = useState<WhatsAppAutoTriggers>(DEFAULT_TRIGGERS_STATE);
   const [adminAlertNumber, setAdminAlertNumber] = useState('201003732029');
   const [templates, setTemplates] = useState<WhatsAppTemplates>({});
   const [waLogs, setWaLogs] = useState<WhatsAppNotificationLog[]>([]);
@@ -60,14 +118,38 @@ export const SystemAdminPanel: React.FC<{ section: 'users' | 'security' | 'setti
         setWaEmail(cfg.whatsapp_automation_email || '');
         setHasSavedPass(Boolean(cfg.has_saved_password));
         setEnvConfigured(Boolean(cfg.env_configured));
-        setAutoOrder(cfg.auto_send_on_order !== false);
-        setAutoStatus(cfg.auto_send_on_status_change !== false);
-        setAutoAdminAlert(cfg.auto_alert_admin_on_order !== false);
+        if (cfg.whatsapp_auto_triggers && typeof cfg.whatsapp_auto_triggers === 'object') {
+          setTriggers({ ...DEFAULT_TRIGGERS_STATE, ...cfg.whatsapp_auto_triggers });
+        } else {
+          setTriggers({
+            admin_new_order: cfg.auto_alert_admin_on_order === true,
+            order_confirmed: cfg.auto_send_on_order === true,
+            payment_verified: cfg.auto_send_on_status_change === true,
+            processing: cfg.auto_send_on_status_change === true,
+            shipped: cfg.auto_send_on_status_change === true,
+            out_for_delivery: cfg.auto_send_on_status_change === true,
+            delivered: cfg.auto_send_on_status_change === true,
+            cancelled: cfg.auto_send_on_status_change === true,
+          });
+        }
         setAdminAlertNumber(cfg.admin_alert_whatsapp_number || cfg.whatsapp_number || '201003732029');
         setTemplates(cfg.whatsapp_templates || {});
       }
       setWaLogs(Array.isArray(notifRows) ? notifRows : []);
     } catch {}
+  };
+
+  const setAllTriggers = (enabled: boolean) => {
+    setTriggers({
+      admin_new_order: enabled,
+      order_confirmed: enabled,
+      payment_verified: enabled,
+      processing: enabled,
+      shipped: enabled,
+      out_for_delivery: enabled,
+      delivered: enabled,
+      cancelled: enabled,
+    });
   };
 
   useEffect(() => {
@@ -132,9 +214,17 @@ export const SystemAdminPanel: React.FC<{ section: 'users' | 'security' | 'setti
           whatsapp_automation_url: waUrl,
           whatsapp_automation_email: waEmail,
           whatsapp_automation_pass: waPass || undefined,
-          auto_send_on_order: autoOrder,
-          auto_send_on_status_change: autoStatus,
-          auto_alert_admin_on_order: autoAdminAlert,
+          whatsapp_auto_triggers: triggers,
+          auto_send_on_order: triggers.order_confirmed,
+          auto_send_on_status_change: Boolean(
+            triggers.payment_verified ||
+            triggers.processing ||
+            triggers.shipped ||
+            triggers.out_for_delivery ||
+            triggers.delivered ||
+            triggers.cancelled
+          ),
+          auto_alert_admin_on_order: triggers.admin_new_order,
           admin_alert_whatsapp_number: adminAlertNumber,
           whatsapp_templates: templates
         });
@@ -258,30 +348,77 @@ export const SystemAdminPanel: React.FC<{ section: 'users' | 'security' | 'setti
               </label>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-              <label className="flex items-center gap-2.5 p-3 rounded-xl bg-amber-50 border border-amber-200 cursor-pointer font-bold">
-                <input type="checkbox" checked={autoAdminAlert} onChange={e => setAutoAdminAlert(e.target.checked)} className="accent-[#fe9931] w-4 h-4" />
-                <span>تنبيه فوري للأدمن على الواتساب عند وصول أي طلب جديد</span>
-              </label>
-              <label className="space-y-1 font-bold bg-amber-50/50 border border-amber-200 p-3 rounded-xl">
-                <span>رقم واتساب الأدمن لاستلام تنبيهات الطلبات (يدعم أكثر من رقم مفصولين بفاصلة ,)</span>
-                <input
-                  type="text"
-                  dir="ltr"
-                  value={adminAlertNumber}
-                  onChange={e => setAdminAlertNumber(e.target.value)}
-                  placeholder="01003732029, 01554826209"
-                  className="w-full px-3 py-1.5 border rounded-lg bg-white font-normal"
-                />
-              </label>
-              <label className="flex items-center gap-2.5 p-3 rounded-xl bg-gray-50 border cursor-pointer font-bold">
-                <input type="checkbox" checked={autoOrder} onChange={e => setAutoOrder(e.target.checked)} className="accent-[#fe9931] w-4 h-4" />
-                <span>إرسال رسالة تأكيد تلقائياً للعميل فور إتمام الطلب</span>
-              </label>
-              <label className="flex items-center gap-2.5 p-3 rounded-xl bg-gray-50 border cursor-pointer font-bold">
-                <input type="checkbox" checked={autoStatus} onChange={e => setAutoStatus(e.target.checked)} className="accent-[#fe9931] w-4 h-4" />
-                <span>إرسال تلقائي عند تحديث الحالة (شحن / مندوب / توصيل / دفع)</span>
-              </label>
+            <label className="space-y-1 font-bold bg-amber-50/50 border border-amber-200 p-3 rounded-xl block">
+              <span>رقم واتساب الأدمن لاستلام تنبيهات الطلبات (يدعم أكثر من رقم مفصولين بفاصلة ,)</span>
+              <input
+                type="text"
+                dir="ltr"
+                value={adminAlertNumber}
+                onChange={e => setAdminAlertNumber(e.target.value)}
+                placeholder="01003732029, 01554826209"
+                className="w-full px-3 py-1.5 border rounded-lg bg-white font-normal"
+              />
+            </label>
+
+            <div className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="font-extrabold text-sm text-[#252a31]">
+                    التحكم الفردي في الإرسال التلقائي عبر واتساب (هل يتعمل ولا ميتعملش؟)
+                  </p>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    أي مربع غير محدد لن تُرسل رسالته تلقائياً، ويمكنك إرسالها يدوياً من جدول الطلبات متى أردت.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAllTriggers(true)}
+                    className="px-3 py-1.5 rounded-full bg-green-50 hover:bg-green-100 text-green-800 border border-green-200 font-bold text-[11px]"
+                  >
+                    تفعيل الكل تلقائياً
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAllTriggers(false)}
+                    className="px-3 py-1.5 rounded-full bg-white hover:bg-gray-100 text-gray-700 border border-gray-300 font-bold text-[11px]"
+                  >
+                    إيقاف التلقائي للكل (يدوي فقط)
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                {AUTO_TRIGGER_OPTIONS.map(opt => {
+                  const checked = Boolean(triggers[opt.key]);
+                  return (
+                    <label
+                      key={opt.key}
+                      className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition ${
+                        checked
+                          ? 'bg-green-50/70 border-green-300'
+                          : 'bg-white border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={e =>
+                          setTriggers(prev => ({
+                            ...prev,
+                            [opt.key]: e.target.checked
+                          }))
+                        }
+                        className="mt-0.5 w-4 h-4 accent-[#fe9931]"
+                      />
+                      <div className="min-w-0">
+                        <span className="font-extrabold text-[#252a31] block leading-snug">{opt.title}</span>
+                        <span className="text-[11px] text-gray-500 block mt-0.5 font-normal">{opt.desc}</span>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
@@ -420,6 +557,13 @@ export const SystemAdminPanel: React.FC<{ section: 'users' | 'security' | 'setti
         <MarketingAdToolsCard formSettings={formSettings} setFormSettings={setFormSettings} />
         <button type="submit" className="px-6 py-2.5 rounded-full bg-[#fe9931] text-white font-bold">حفظ الإعدادات</button>
       </form>
+      <PolicyPagesEditorCard
+        settings={settings}
+        onSavePolicyPages={async (nextPolicyPages: PolicyPagesConfig) => {
+          setFormSettings(prev => ({ ...prev, policy_pages: nextPolicyPages }));
+          await updateSettings({ ...formSettings, policy_pages: nextPolicyPages });
+        }}
+      />
     </div>
   );
 };

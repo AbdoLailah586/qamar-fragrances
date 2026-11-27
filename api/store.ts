@@ -249,6 +249,8 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
     // Keep server-side CRM and payment gateway secrets intact unless updated via their dedicated admin actions
     const merged = {
       ...incoming,
+      whatsapp_auto_triggers: incoming.whatsapp_auto_triggers ?? current.whatsapp_auto_triggers,
+      policy_pages: incoming.policy_pages ?? current.policy_pages,
       whatsapp_automation_url: current.whatsapp_automation_url,
       whatsapp_automation_email: current.whatsapp_automation_email,
       whatsapp_automation_pass: current.whatsapp_automation_pass,
@@ -451,9 +453,11 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
       try {
         const typeMap: Record<string, any> = {
           confirmed: 'order_confirmed',
+          processing: 'processing',
           shipped: 'shipped',
           out_for_delivery: 'out_for_delivery',
-          delivered: 'delivered'
+          delivered: 'delivered',
+          cancelled: 'cancelled'
         };
         const waType = changes.payment_status === 'verified' ? 'payment_verified' : typeMap[changes.order_status];
         if (waType) {
@@ -462,7 +466,7 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
             const ord = mapRowToOrder(rows[0]);
             const settings = await store.getStoreSettings().catch(() => ({}));
             const crm = resolveCrmConfig(settings);
-            if (crm.configured && crm.autoSendOnStatusChange && (ord.customer_whatsapp || ord.customer_phone)) {
+            if (crm.configured && crm.shouldAutoSend(waType as any) && (ord.customer_whatsapp || ord.customer_phone)) {
               const text = buildServerOrderWhatsAppMessage(waType, ord, settings);
               const dispatch = deps?.dispatchWhatsApp || dispatchWhatsAppViaCrm;
               await dispatch(sql, {
@@ -555,10 +559,10 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
         const crm = resolveCrmConfig(orderSettings);
         const dispatch = deps?.dispatchWhatsApp || dispatchWhatsAppViaCrm;
         const customerRecipient = order.customer_whatsapp || phone;
-        const adminRecipients = crm.autoAlertAdminOnOrder ? crm.adminAlertRecipients : [];
+        const adminRecipients = crm.shouldAutoSend('admin_new_order') ? crm.adminAlertRecipients : [];
 
         const jobs: Promise<any>[] = [];
-        if (crm.configured && crm.autoSendOnOrder && customerRecipient) {
+        if (crm.configured && crm.shouldAutoSend('order_confirmed') && customerRecipient) {
           jobs.push(
             dispatch(sql, {
               recipient: customerRecipient,

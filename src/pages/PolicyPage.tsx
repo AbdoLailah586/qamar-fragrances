@@ -3,13 +3,16 @@ import { ShieldCheck, FileText, RotateCcw, Truck, ArrowRight, MessageCircle, Pho
 import { useStore, type AppTab } from '../context/StoreContext';
 import { formatEGP } from '../utils/arabicNumbers';
 import { whatsappUrl } from '../utils/whatsappService';
+import { POLICY_META, getDefaultPolicyDoc, parsePolicyBody, type PolicyKey, type ParsedPolicySection } from '../utils/policyDefaults';
 
 export type PolicyTabKey = Extract<AppTab, 'terms' | 'privacy' | 'refund' | 'shipping'>;
 
-interface PolicySection {
-  title: string;
-  points: string[];
-}
+const POLICY_ICONS: Record<PolicyKey, React.FC<{ className?: string }>> = {
+  terms: FileText,
+  privacy: ShieldCheck,
+  refund: RotateCcw,
+  shipping: Truck,
+};
 
 interface PolicyDoc {
   key: PolicyTabKey;
@@ -18,7 +21,7 @@ interface PolicyDoc {
   updatedAt: string;
   intro: string;
   icon: React.FC<{ className?: string }>;
-  sections: PolicySection[];
+  sections: ParsedPolicySection[];
 }
 
 export const PolicyPage: React.FC<{ activePolicy: PolicyTabKey }> = ({ activePolicy }) => {
@@ -26,148 +29,24 @@ export const PolicyPage: React.FC<{ activePolicy: PolicyTabKey }> = ({ activePol
   const storeName = settings.store_name_ar || 'قمر للعطور';
   const freeThreshold = formatEGP(settings.free_shipping_threshold || 1500);
 
-  const docs: PolicyDoc[] = [
-    {
-      key: 'terms',
-      tabLabel: 'شروط الاستخدام',
-      heading: 'شروط وأحكام استخدام المتجر',
+  const policyKeys: PolicyKey[] = ['terms', 'privacy', 'refund', 'shipping'];
+
+  const docs: PolicyDoc[] = policyKeys.map(key => {
+    const def = getDefaultPolicyDoc(key, { storeName, freeThreshold });
+    const custom = settings.policy_pages?.[key];
+    const heading = custom?.heading?.trim() || def.heading;
+    const intro = custom?.intro?.trim() || def.intro;
+    const rawBody = custom?.body?.trim() ? custom.body : def.body;
+    return {
+      key: key as PolicyTabKey,
+      tabLabel: POLICY_META[key].tabLabel,
+      heading,
       updatedAt: 'نوفمبر 2026',
-      intro: `مرحباً بك في متجر ${storeName} (Qamar Fragrances). استخدامك للموقع أو إتمام أي طلب يعني موافقتك على الشروط والأحكام التالية المصممة لحماية حقوق العميل والمتجر بشفافية.`,
-      icon: FileText,
-      sections: [
-        {
-          title: '1. إنشاء الحساب وصحة البيانات',
-          points: [
-            'يجب أن تكون بيانات التواصل المسجلة (الاسم، رقم الهاتف/الواتساب، البريد الإلكتروني، وعنوان التوصيل أو موقع الخريطة) صحيحة ودقيقة لضمان سرعة الشحن وتأكيد الطلبات.',
-            'يتحمل المستخدم مسؤولية الحفاظ على سرية بيانات تسجيل الدخول الخاصة بحسابه، ويمكنه تعديلها أو حذف حسابه نهائياً في أي وقت من صفحة "حسابي".'
-          ]
-        },
-        {
-          title: '2. طبيعة المنتجات والعطور',
-          points: [
-            `يقدم متجر ${storeName} عطور محاكاة فاخرة بجودة عالية، زيوت عطرية، عطور نيش وعربية، ومستحضرات معطرة بأحجام متعددة.`,
-            'قد يختلف لون الزجاجة أو التغليف الخارجي أحياناً بين دفعات التعبئة حسب التحديثات الشكلية مع الحفاظ التام على جودة الزيت العطري وثباته والتركيز المعلن.'
-          ]
-        },
-        {
-          title: '3. الأسعار والطلبات والإلغاء',
-          points: [
-            'تُعرض جميع الأسعار بالجنيه المصري (ج.م.) شاملة تغليف الحماية القياسي، وتُحتسب رسوم الشحن حسب المحافظة وتظهر بوضوح قبل تأكيد الطلب.',
-            'يحق للعميل طلب تعديل أو إلغاء الطلب مجاناً قبل تسليمه لشركة الشحن عبر الواتساب أو من صفحة حسابي.',
-            'يحتفظ المتجر بحق رفض أو إلغاء أي طلب في حال عدم توافر الكمية أو عدم تأكيد العميل للبيانات عبر الهاتف/الواتساب.'
-          ]
-        },
-        {
-          title: '4. حقوق الملكية والاستخدام العادل',
-          points: [
-            `جميع العلامات والصور والنصوص والأوصاف العطرية المعروضة داخل ${storeName} مخصصة لاستخدام المتجر وعملائه ولا يُسمح بإعادة نسخها أو استغلالها تجارياً دون إذن مسبق.`
-          ]
-        }
-      ]
-    },
-    {
-      key: 'privacy',
-      tabLabel: 'سياسة الخصوصية',
-      heading: 'سياسة الخصوصية وحماية البيانات',
-      updatedAt: 'نوفمبر 2026',
-      intro: `في ${storeName} نحترم خصوصيتك ونلتزم بحماية بياناتك الشخصية واستخدامها فقط في إتمام طلباتك وتحسين تجربتك في التسوق.`,
-      icon: ShieldCheck,
-      sections: [
-        {
-          title: '1. البيانات التي نقوم بجمعها',
-          points: [
-            'بيانات الحساب والتوصيل: الاسم الكامل، البريد الإلكتروني، رقم الهاتف/الواتساب، المحافظة، العنوان التفصيلي، وإحداثيات الموقع على الخريطة فقط عندما تختار تحديدها لتسهيل وصول المندوب.',
-            'بيانات النشاط داخل المتجر: المنتجات التي تزورها وسلة التسوق لتحسين التوصيات العطرية ومتابعة السلات وإكمال الطلبات.'
-          ]
-        },
-        {
-          title: '2. كيف نستخدم بياناتك؟',
-          points: [
-            'تجهيز الطلبات وتسليمها لشركة الشحن ومندوب التوصيل.',
-            'إرسال إشعارات حالة الطلب تلقائياً عبر الواتساب أو البريد الإلكتروني (تأكيد الطلب، الشحن، الخروج للتوصيل).',
-            'تقديم خدمة الدعم الفني والرد على الاستفسارات وطلبات الاستبدال أو الاسترجاع.'
-          ]
-        },
-        {
-          title: '3. حماية الحسابات وتسجيل الدخول عبر Google',
-          points: [
-            'تُخزن كلمات المرور بصورة مشفرة (Hash)، وتُدار الجلسات عبر ملفات ارتباط آمنة (HttpOnly Cookies).',
-            'عند تسجيل الدخول بحساب Google نستخدم فقط الاسم والبريد الإلكتروني وصورة الحساب لإنشاء أو ربط حسابك بالمتجر ولا نطلع على كلمة مرور حسابك في جوجل.'
-          ]
-        },
-        {
-          title: '4. مشاركة البيانات وحق حذف الحساب',
-          points: [
-            'لا نبيع ولا نؤجر بيانات عملائنا لأي جهة خارجية، ولا نشارك بيانات التوصيل إلا بالقدر اللازم مع شركة الشحن لإيصال طلبك.',
-            'يحق لك في أي وقت تعديل بياناتك أو حذف حسابك نهائياً من داخل صفحة الحساب الشخصي.'
-          ]
-        }
-      ]
-    },
-    {
-      key: 'refund',
-      tabLabel: 'الاستبدال والاسترجاع',
-      heading: 'سياسة الاستبدال والاسترجاع',
-      updatedAt: 'نوفمبر 2026',
-      intro: `نهدف إلى رضاك التام عن كل عطر تطلبه من ${storeName}. نلتزم بضوابط واضحة وعادلة للاستبدال والاسترجاع.`,
-      icon: RotateCcw,
-      sections: [
-        {
-          title: '1. حالات الاستبدال أو الاسترجاع المجاني',
-          points: [
-            'إذا وصلك منتج مختلف عن المطلوب في الفاتورة أو به تلف/كسر أو تسريب أثناء الشحن، يتحمل المتجر كامل تكاليف الشحن للاستبدال الفوري أو استرداد المبلغ.',
-            'يرجى التواصل معنا خلال 48 ساعة من الاستلام مع إرسال صورة أو فيديو يوضح حالة الطرد فور فتحه.'
-          ]
-        },
-        {
-          title: '2. الاستبدال أو الاسترجاع الاختياري (خلال 14 يوماً)',
-          points: [
-            'يمكن استرجاع أو استبدال الزجاجات القياسية المغلقة بحالتها الأصلية وبكامل السيلوفان/التغليف دون فتح أو استخدام خلال 14 يوماً من تاريخ الاستلام، مع تحمل العميل لمصاريف الشحن.',
-            'حرصاً على سلامة وجودة المنتجات العطرية، لا يمكن استرجاع الزجاجات التي تم فتحها أو رشها أو الطلبات المعبأة بتركيبات مخصصة بعد الاستخدام ما لم يثبت وجود عيب.'
-          ]
-        },
-        {
-          title: '3. آلية ومدة استرداد المبلغ',
-          points: [
-            'بعد استلام المرتجع وفحصه خلال يومي عمل، يتم استرداد المبلغ بنفس وسيلة الدفع (فودافون كاش / إنستاباي / تحويل بنكي) خلال 3 إلى 7 أيام عمل.'
-          ]
-        }
-      ]
-    },
-    {
-      key: 'shipping',
-      tabLabel: 'الشحن والتوصيل',
-      heading: 'سياسة الشحن والتوصيل ووسائل الدفع',
-      updatedAt: 'نوفمبر 2026',
-      intro: `نوصل عطورنا إلى جميع محافظات جمهورية مصر العربية بتغليف آمن يحفظ جودة الزجاجات أثناء النقل.`,
-      icon: Truck,
-      sections: [
-        {
-          title: '1. مدد الشحن التقديرية',
-          points: [
-            'الدقهلية والمنصورة: خلال 1 إلى 2 يوم عمل.',
-            'القاهرة الكبرى والجيزة والإسكندرية ومحافظات الدلتا والقناة: خلال 2 إلى 4 أيام عمل.',
-            'محافظات الصعيد والبحر الأحمر ومطروح وسيناء والوادي الجديد: خلال 3 إلى 6 أيام عمل.'
-          ]
-        },
-        {
-          title: '2. رسوم الشحن والشحن المجاني',
-          points: [
-            'تُحدد تكلفة الشحن تلقائياً وفق المحافظة المختارة في صفحة إتمام الطلب.',
-            `الشحن مجاني تماماً للطلبات التي تصل قيمتها إلى ${freeThreshold} أو أكثر.`
-          ]
-        },
-        {
-          title: '3. المتابعة والدفع والاستلام',
-          points: [
-            'يتاح الدفع عند الاستلام (كاش) أو الدفع الإلكتروني عبر إنستاباي وفودافون كاش.',
-            'بمجرد تأكيد الطلب يصلك رقم تتبع (QMR-...) يمكنك متابعته في أي لحظة من صفحة تتبع الطلب كما تصلك التحديثات التلقائية على الواتساب.',
-            'تحديد موقع التوصيل عبر GPS أو الخريطة التفاعلية في صفحة الدفع يساعد المندوب على الوصول إليك بدقة وسرعة أكبر.'
-          ]
-        }
-      ]
-    }
-  ];
+      intro,
+      icon: POLICY_ICONS[key],
+      sections: parsePolicyBody(rawBody),
+    };
+  });
 
   const currentDoc = docs.find(d => d.key === activePolicy) || docs[0];
   const Icon = currentDoc.icon;
@@ -224,14 +103,23 @@ export const PolicyPage: React.FC<{ activePolicy: PolicyTabKey }> = ({ activePol
         </header>
 
         <div className="space-y-6">
-          {currentDoc.sections.map(section => (
-            <section key={section.title} className="space-y-2.5">
-              <h2 className="text-base md:text-lg font-extrabold text-[#252a31]">{section.title}</h2>
-              <ul className="space-y-2 pr-4 list-disc marker:text-[#fe9931] text-sm text-gray-600 leading-relaxed">
-                {section.points.map((pt, i) => (
-                  <li key={i}>{pt}</li>
-                ))}
-              </ul>
+          {currentDoc.sections.map((section, idx) => (
+            <section key={`${section.title}-${idx}`} className="space-y-2.5">
+              {section.title && (
+                <h2 className="text-base md:text-lg font-extrabold text-[#252a31]">{section.title}</h2>
+              )}
+              {section.paragraphs.map((p, i) => (
+                <p key={`p-${i}`} className="text-sm text-gray-600 leading-relaxed">
+                  {p}
+                </p>
+              ))}
+              {section.bullets.length > 0 && (
+                <ul className="space-y-2 pr-4 list-disc marker:text-[#fe9931] text-sm text-gray-600 leading-relaxed">
+                  {section.bullets.map((pt, i) => (
+                    <li key={`b-${i}`}>{pt}</li>
+                  ))}
+                </ul>
+              )}
             </section>
           ))}
         </div>

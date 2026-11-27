@@ -139,17 +139,29 @@ export const ProductDetails: React.FC = () => {
             }}
             className="relative aspect-square rounded-2xl overflow-hidden bg-[#f8f9fa] border border-gray-100 cursor-zoom-in group"
           >
-            <img
-              key={images[activeImgIdx] || images[0]}
-              src={images[activeImgIdx] || images[0]}
-              alt={product.name_ar}
-              style={{
-                transformOrigin: zoomOrigin,
-                transform: isZooming ? 'scale(1.42)' : 'scale(1)'
-              }}
-              className="w-full h-full object-cover qamar-img-fade will-change-transform transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
-            />
-            <span className="hidden md:inline-block pointer-events-none absolute bottom-3 left-3 px-2.5 py-1 rounded-full bg-white/85 backdrop-blur-sm text-[11px] font-bold text-[#4f4335] opacity-80 group-hover:opacity-0 transition-opacity duration-300 shadow-xs">
+            {images.map((img, idx) => (
+              <div
+                key={`${product.id}-slide-${idx}`}
+                className={`qamar-gallery-slide absolute inset-0 flex items-center justify-center transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+                  activeImgIdx === idx
+                    ? 'opacity-100 scale-100 translate-x-0 z-[1]'
+                    : idx < activeImgIdx
+                      ? 'opacity-0 scale-[0.96] -translate-x-5 pointer-events-none z-0'
+                      : 'opacity-0 scale-[0.96] translate-x-5 pointer-events-none z-0'
+                }`}
+              >
+                <img
+                  src={img}
+                  alt={activeImgIdx === idx ? product.name_ar : ''}
+                  style={{
+                    transformOrigin: zoomOrigin,
+                    transform: activeImgIdx === idx && isZooming ? 'scale(1.42)' : 'scale(1)'
+                  }}
+                  className="w-full h-full object-cover will-change-transform transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
+                />
+              </div>
+            ))}
+            <span className="hidden md:inline-block pointer-events-none absolute bottom-3 left-3 px-2.5 py-1 rounded-full bg-white/85 backdrop-blur-sm text-[11px] font-bold text-[#4f4335] opacity-80 group-hover:opacity-0 transition-opacity duration-300 shadow-xs z-10">
               مرّر للتكبير ✨
             </span>
             {images.length > 1 && (
@@ -157,14 +169,16 @@ export const ProductDetails: React.FC = () => {
                 <button
                   type="button"
                   onClick={e => { e.stopPropagation(); setActiveImgIdx(i => (i - 1 + images.length) % images.length); }}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 shadow flex items-center justify-center text-[#252a31] hover:text-[#fe9931] hover:scale-110 active:scale-95 transition-all"
+                  aria-label="الصورة السابقة"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 shadow flex items-center justify-center text-[#252a31] hover:text-[#fe9931] hover:scale-110 active:scale-95 md:opacity-0 md:group-hover:opacity-100 transition-all duration-300 z-10"
                 >
                   <ChevronRight className="w-5 h-5" />
                 </button>
                 <button
                   type="button"
                   onClick={e => { e.stopPropagation(); setActiveImgIdx(i => (i + 1) % images.length); }}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 shadow flex items-center justify-center text-[#252a31] hover:text-[#fe9931] hover:scale-110 active:scale-95 transition-all"
+                  aria-label="الصورة التالية"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 shadow flex items-center justify-center text-[#252a31] hover:text-[#fe9931] hover:scale-110 active:scale-95 md:opacity-0 md:group-hover:opacity-100 transition-all duration-300 z-10"
                 >
                   <ChevronLeft className="w-5 h-5" />
                 </button>

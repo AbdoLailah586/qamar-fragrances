@@ -824,6 +824,8 @@ describe('Admin Users CRM, Insights & Legal Policy Pages', () => {
   test('UsersCrmPanel, PolicyPage, Footer, and StoreContext expose full user CRM and policy routes', () => {
     const crmSrc = readFileSync(resolve(ROOT, 'src/pages/admin/UsersCrmPanel.tsx'), 'utf8');
     const policySrc = readFileSync(resolve(ROOT, 'src/pages/PolicyPage.tsx'), 'utf8');
+    const policyDefaultsSrc = readFileSync(resolve(ROOT, 'src/utils/policyDefaults.ts'), 'utf8');
+    const policyEditorSrc = readFileSync(resolve(ROOT, 'src/pages/admin/PolicyPagesEditorCard.tsx'), 'utf8');
     const footerSrc = readFileSync(resolve(ROOT, 'src/components/Footer.tsx'), 'utf8');
     const ctxSrc = readFileSync(resolve(ROOT, 'src/context/StoreContext.tsx'), 'utf8');
     const appSrc = readFileSync(resolve(ROOT, 'src/App.tsx'), 'utf8');
@@ -835,10 +837,13 @@ describe('Admin Users CRM, Insights & Legal Policy Pages', () => {
     assert.match(crmSrc, /الأوردرات المنفذة/);
     assert.match(crmSrc, /آخر ترافيك/);
 
-    assert.match(policySrc, /شروط وأحكام استخدام المتجر/);
-    assert.match(policySrc, /سياسة الخصوصية وحماية البيانات/);
-    assert.match(policySrc, /سياسة الاستبدال والاسترجاع/);
-    assert.match(policySrc, /سياسة الشحن والتوصيل/);
+    assert.match(policySrc, /getDefaultPolicyDoc/);
+    assert.match(policySrc, /policy_pages/);
+    assert.match(policyDefaultsSrc, /شروط وأحكام استخدام المتجر/);
+    assert.match(policyDefaultsSrc, /سياسة الخصوصية وحماية البيانات/);
+    assert.match(policyDefaultsSrc, /سياسة الاستبدال والاسترجاع/);
+    assert.match(policyDefaultsSrc, /سياسة الشحن والتوصيل/);
+    assert.match(policyEditorSrc, /تعديل محتوى صفحات السياسات والشروط والأحكام/);
     assert.match(footerSrc, /navigate\('terms'\)/);
     assert.match(footerSrc, /navigate\('privacy'\)/);
     assert.match(footerSrc, /navigate\('refund'\)/);
@@ -1314,5 +1319,77 @@ describe('Online Payment Gateway Infrastructure (Kashier / Paymob) & Liquid Glas
     assert.match(cardSrc, /Kashier/);
     assert.match(cardSrc, /Paymob/);
     assert.ok(typeof paymentGateway.verifyPaymobHmac === 'function');
+  });
+
+  test('WhatsApp per-event checkboxes default to disabled and gate createOrder & updateOrderState individually', async () => {
+    const defaultCfg = whatsappCrm.resolveCrmConfig({
+      whatsapp_automation_url: 'https://crm.example',
+      whatsapp_automation_email: 'bot@crm.pro',
+      whatsapp_automation_pass: 'secret'
+    });
+    for (const key of ['admin_new_order', 'order_confirmed', 'payment_verified', 'processing', 'shipped', 'out_for_delivery', 'delivered', 'cancelled']) {
+      assert.equal(defaultCfg.shouldAutoSend(key), false, `Expected ${key} to default to false`);
+    }
+
+    const dispatched = [];
+    const sampleOrder = {
+      id: 'ord-qmr-chk-1',
+      order_number: 'QMR-2026-CHK1',
+      customer_name: 'سلمى قمر',
+      customer_phone: '01011223344',
+      customer_whatsapp: '01011223344',
+      governorate: 'القاهرة',
+      address_details: 'مدينة نصر',
+      subtotal: 400,
+      shipping_fee: 60,
+      total: 460,
+      payment_method: 'cod',
+      items: [{ product: { id: 'p-1', name_ar: 'عطر قمر', price: 400 }, selectedSize: '50ml', quantity: 1, unitPrice: 400 }]
+    };
+    const fakeSql = Object.assign(
+      async (strings) => (/SELECT \* FROM orders/i.test(strings.join('?')) ? [sampleOrder] : []),
+      { query: async (_q, params) => [{ id: JSON.parse(params[0]).id }] }
+    );
+    const adminUser = { id: 'adm-qmr', role: 'admin', admin_permissions: ['orders', 'whatsapp'] };
+    const selectiveSettings = {
+      whatsapp_automation_url: 'https://crm.example',
+      whatsapp_automation_email: 'bot@crm.pro',
+      whatsapp_automation_pass: 'secret',
+      admin_alert_whatsapp_number: '01003732029',
+      whatsapp_auto_triggers: {
+        admin_new_order: false,
+        order_confirmed: true,
+        payment_verified: false,
+        processing: false,
+        shipped: true,
+        out_for_delivery: false,
+        delivered: false,
+        cancelled: false
+      }
+    };
+
+    const runRpc = async (method, args, user) => {
+      const req = createMockReq({
+        method: 'POST',
+        headers: { origin: 'https://qamar-fragrances.com' },
+        body: { method, args }
+      });
+      const res = createMockRes();
+      await storeApi.default(req, res, {
+        sql: fakeSql,
+        store: { async getStoreSettings() { return selectiveSettings; } },
+        user,
+        dispatchWhatsApp: async (_sql, payload) => { dispatched.push(payload.type); return { success: true }; }
+      });
+      return res;
+    };
+
+    await runRpc('createOrder', [sampleOrder], null);
+    await runRpc('updateOrderState', [sampleOrder.id, { payment_status: 'verified' }], adminUser);
+    await runRpc('updateOrderState', [sampleOrder.id, { order_status: 'processing' }], adminUser);
+    await runRpc('updateOrderState', [sampleOrder.id, { order_status: 'shipped' }], adminUser);
+    await runRpc('updateOrderState', [sampleOrder.id, { order_status: 'delivered' }], adminUser);
+
+    assert.deepEqual(dispatched, ['order_confirmed', 'shipped']);
   });
 });

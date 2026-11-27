@@ -1,6 +1,56 @@
 import { randomBytes } from 'node:crypto';
 import { normalizePhone } from '../src/utils/deliveryAddress.js';
-import type { Order, StoreSettings, WhatsAppNotificationType, WhatsAppTemplates } from '../src/types.js';
+import type { Order, StoreSettings, WhatsAppAutoTriggers, WhatsAppNotificationType, WhatsAppTemplates } from '../src/types.js';
+
+export type WhatsAppAutoTriggerKey = keyof WhatsAppAutoTriggers;
+
+export const DEFAULT_WHATSAPP_AUTO_TRIGGERS: WhatsAppAutoTriggers = {
+  admin_new_order: false,
+  order_confirmed: false,
+  payment_verified: false,
+  processing: false,
+  shipped: false,
+  out_for_delivery: false,
+  delivered: false,
+  cancelled: false,
+};
+
+const AUTO_TRIGGER_KEYS: WhatsAppAutoTriggerKey[] = [
+  'admin_new_order',
+  'order_confirmed',
+  'payment_verified',
+  'processing',
+  'shipped',
+  'out_for_delivery',
+  'delivered',
+  'cancelled',
+];
+
+export function resolveWhatsAppAutoTriggers(settings?: any): WhatsAppAutoTriggers {
+  const raw = settings?.whatsapp_auto_triggers;
+  if (raw && typeof raw === 'object') {
+    const out: WhatsAppAutoTriggers = { ...DEFAULT_WHATSAPP_AUTO_TRIGGERS };
+    for (const key of AUTO_TRIGGER_KEYS) {
+      out[key] = Boolean(raw[key]);
+    }
+    return out;
+  }
+
+  // Legacy fallback: only enable if legacy boolean was explicitly true; unset defaults to false.
+  const orderFlag = settings?.auto_send_on_order === true;
+  const adminFlag = settings?.auto_alert_admin_on_order === true;
+  const statusFlag = settings?.auto_send_on_status_change === true;
+  return {
+    admin_new_order: adminFlag,
+    order_confirmed: orderFlag,
+    payment_verified: statusFlag,
+    processing: statusFlag,
+    shipped: statusFlag,
+    out_for_delivery: statusFlag,
+    delivered: statusFlag,
+    cancelled: statusFlag,
+  };
+}
 
 export const DEFAULT_WHATSAPP_TEMPLATES: Required<WhatsAppTemplates> = {
   order_confirmed: [
@@ -41,6 +91,14 @@ export const DEFAULT_WHATSAPP_TEMPLATES: Required<WhatsAppTemplates> = {
     `عزيزنا *{customer_name}*،`,
     `تم مراجعة وتأكيد الدفع لطلبك رقم *#{order_number}* بمبلغ *{total} ج.م.* بنجاح.`,
     `جاري الآن تجهيز وتغليف عطورك لتسليمها لشركة الشحن.`
+  ].join('\n'),
+  processing: [
+    `*تم تجهيز طلبك وجاري تسليمه لشركة الشحن - قمر للعطور* 📦✨`,
+    ``,
+    `عزيزنا *{customer_name}*،`,
+    `تم تجهيز وتغليف عطور طلبك رقم *#{order_number}* بنجاح، وجاري الآن تسليمه لشركة الشحن.`,
+    `🚚 شركة الشحن: *{courier_name}*`,
+    `📍 العنوان: {governorate}`
   ].join('\n'),
   shipped: [
     `*شحنتك في الطريق إليك - قمر للعطور* 🚚✨`,
@@ -213,14 +271,24 @@ export function resolveCrmConfig(settings?: any) {
   const baseUrl = String(settings?.whatsapp_automation_url || process.env.WHATSAPP_CRM_URL || '').trim().replace(/\/+$/, '');
   const email = String(settings?.whatsapp_automation_email || process.env.WHATSAPP_CRM_EMAIL || '').trim();
   const password = String(settings?.whatsapp_automation_pass || process.env.WHATSAPP_CRM_PASSWORD || '');
+  const triggers = resolveWhatsAppAutoTriggers(settings);
   return {
     baseUrl,
     email,
     password,
     configured: Boolean(baseUrl && email && password),
-    autoSendOnOrder: settings?.auto_send_on_order !== false,
-    autoSendOnStatusChange: settings?.auto_send_on_status_change !== false,
-    autoAlertAdminOnOrder: settings?.auto_alert_admin_on_order !== false,
+    triggers,
+    shouldAutoSend: (eventKey: WhatsAppAutoTriggerKey) => Boolean(triggers[eventKey]),
+    autoSendOnOrder: triggers.order_confirmed,
+    autoSendOnStatusChange: Boolean(
+      triggers.payment_verified ||
+      triggers.processing ||
+      triggers.shipped ||
+      triggers.out_for_delivery ||
+      triggers.delivered ||
+      triggers.cancelled
+    ),
+    autoAlertAdminOnOrder: triggers.admin_new_order,
     adminAlertRecipients: resolveAdminAlertRecipients(settings)
   };
 }

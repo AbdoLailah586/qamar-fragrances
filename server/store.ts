@@ -6,6 +6,7 @@ import {
   dispatchWhatsAppViaCrm,
   ensureWhatsAppNotificationsTable,
   resolveCrmConfig,
+  resolveWhatsAppAutoTriggers,
   testWhatsAppCrmConnection,
   DEFAULT_WHATSAPP_TEMPLATES
 } from './whatsappCrm.js';
@@ -1025,7 +1026,7 @@ export const neonDb = {
         const orderObj = mapRowToOrder(updatedRows[0]);
         const settings = await this.getStoreSettings();
         const crm = resolveCrmConfig(settings);
-        if (crm.configured && crm.autoSendOnStatusChange && (orderObj.customer_whatsapp || orderObj.customer_phone)) {
+        if (crm.configured && crm.shouldAutoSend('shipped') && (orderObj.customer_whatsapp || orderObj.customer_phone)) {
           const text = buildServerOrderWhatsAppMessage('shipped', orderObj, settings);
           await dispatchWhatsAppViaCrm(sql, {
             recipient: orderObj.customer_whatsapp || orderObj.customer_phone,
@@ -1049,6 +1050,7 @@ export const neonDb = {
       await logAudit({ actorId: options?.actor?.id, actorName: options?.actor?.name, action: 'ORDER_STATUS_CHANGED', entity: 'order', entityId: orderId, before: { status: rows[0].status }, after: { status }, reason: options?.overrideReason });
       const notifMap: Record<string, WhatsAppNotificationType> = {
         confirmed: 'order_confirmed',
+        processing: 'processing',
         shipped: 'shipped',
         out_for_delivery: 'out_for_delivery',
         delivered: 'delivered',
@@ -1061,7 +1063,7 @@ export const neonDb = {
           const orderObj = mapRowToOrder(updatedRows[0]);
           const settings = await this.getStoreSettings();
           const crm = resolveCrmConfig(settings);
-          if (crm.configured && crm.autoSendOnStatusChange && (orderObj.customer_whatsapp || orderObj.customer_phone)) {
+          if (crm.configured && crm.shouldAutoSend(waType as any) && (orderObj.customer_whatsapp || orderObj.customer_phone)) {
             const text = buildServerOrderWhatsAppMessage(waType, orderObj, settings);
             await dispatchWhatsAppViaCrm(sql, {
               recipient: orderObj.customer_whatsapp || orderObj.customer_phone,
@@ -1380,6 +1382,7 @@ export const neonDb = {
       auto_send_on_order: crm.autoSendOnOrder,
       auto_send_on_status_change: crm.autoSendOnStatusChange,
       auto_alert_admin_on_order: crm.autoAlertAdminOnOrder,
+      whatsapp_auto_triggers: crm.triggers,
       admin_alert_whatsapp_number: settings.admin_alert_whatsapp_number || settings.whatsapp_number || '201003732029',
       whatsapp_number: settings.whatsapp_number || '201003732029',
       whatsapp_templates: { ...DEFAULT_WHATSAPP_TEMPLATES, ...(settings.whatsapp_templates || {}) }
@@ -1393,16 +1396,35 @@ export const neonDb = {
     auto_send_on_order?: boolean;
     auto_send_on_status_change?: boolean;
     auto_alert_admin_on_order?: boolean;
+    whatsapp_auto_triggers?: Record<string, boolean>;
     admin_alert_whatsapp_number?: string;
     whatsapp_templates?: Record<string, string>;
   }) {
     const current = (await this.getStoreSettings()) || {};
-    const merged: any = {
-      ...current,
-      auto_send_on_order: config.auto_send_on_order ?? current.auto_send_on_order ?? true,
-      auto_send_on_status_change: config.auto_send_on_status_change ?? current.auto_send_on_status_change ?? true,
-      auto_alert_admin_on_order: config.auto_alert_admin_on_order ?? current.auto_alert_admin_on_order ?? true
-    };
+    const merged: any = { ...current };
+    if (config.whatsapp_auto_triggers && typeof config.whatsapp_auto_triggers === 'object') {
+      const sanitized = resolveWhatsAppAutoTriggers({
+        whatsapp_auto_triggers: {
+          ...resolveWhatsAppAutoTriggers(current),
+          ...config.whatsapp_auto_triggers
+        }
+      });
+      merged.whatsapp_auto_triggers = sanitized;
+      merged.auto_alert_admin_on_order = sanitized.admin_new_order;
+      merged.auto_send_on_order = sanitized.order_confirmed;
+      merged.auto_send_on_status_change = Boolean(
+        sanitized.payment_verified ||
+        sanitized.processing ||
+        sanitized.shipped ||
+        sanitized.out_for_delivery ||
+        sanitized.delivered ||
+        sanitized.cancelled
+      );
+    } else {
+      if (config.auto_send_on_order !== undefined) merged.auto_send_on_order = Boolean(config.auto_send_on_order);
+      if (config.auto_send_on_status_change !== undefined) merged.auto_send_on_status_change = Boolean(config.auto_send_on_status_change);
+      if (config.auto_alert_admin_on_order !== undefined) merged.auto_alert_admin_on_order = Boolean(config.auto_alert_admin_on_order);
+    }
     if (typeof config.admin_alert_whatsapp_number === 'string') {
       merged.admin_alert_whatsapp_number = config.admin_alert_whatsapp_number.trim();
     }

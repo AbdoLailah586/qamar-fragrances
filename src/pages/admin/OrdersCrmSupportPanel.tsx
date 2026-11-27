@@ -12,6 +12,7 @@ import type { Order, WhatsAppNotificationType } from '../../types';
 const WA_PRESETS: { type: WhatsAppNotificationType; label: string }[] = [
   { type: 'order_confirmed', label: 'تأكيد الطلب' },
   { type: 'payment_verified', label: 'تأكيد الدفع' },
+  { type: 'processing', label: 'تسليم للشحن' },
   { type: 'shipped', label: 'تم الشحن' },
   { type: 'out_for_delivery', label: 'مع المندوب اليوم' },
   { type: 'delivered', label: 'تم التسليم' },
