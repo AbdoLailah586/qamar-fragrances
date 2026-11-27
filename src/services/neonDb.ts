@@ -8,6 +8,18 @@ import type {
   FragranceNotesEntry
 } from '../types';
 
+function maybeHealEdgeShield(status: number, data: any) {
+  if (status === 403 && data?.code === 'SHIELD_CHALLENGE_REQUIRED' && typeof window !== 'undefined') {
+    try {
+      const last = Number(sessionStorage.getItem('qamar_shield_reload') || 0);
+      if (!last || Date.now() - last > 10_000) {
+        sessionStorage.setItem('qamar_shield_reload', String(Date.now()));
+        window.location.reload();
+      }
+    } catch {}
+  }
+}
+
 async function callStore(method: string, args: any[] = []) {
   const response = await fetch('/api/store', {
     method: 'POST',
@@ -17,7 +29,11 @@ async function callStore(method: string, args: any[] = []) {
   });
   const data = await response.json();
   if (!response.ok) {
-    throw Object.assign(new Error(data.error || 'تعذر تنفيذ الطلب. راجع صلاحية حسابك.'), { code: data.code });
+    maybeHealEdgeShield(response.status, data);
+    throw Object.assign(new Error(data.error || 'تعذر تنفيذ الطلب. راجع صلاحية حسابك.'), {
+      code: data.code,
+      status: response.status
+    });
   }
   return data.result;
 }
@@ -33,7 +49,11 @@ async function callPublicStoreGet(method: string, query: Record<string, string |
   });
   const data = await response.json();
   if (!response.ok) {
-    throw Object.assign(new Error(data.error || 'تعذر تنفيذ الطلب.'), { code: data.code });
+    maybeHealEdgeShield(response.status, data);
+    throw Object.assign(new Error(data.error || 'تعذر تنفيذ الطلب.'), {
+      code: data.code,
+      status: response.status
+    });
   }
   return data.result;
 }
@@ -124,7 +144,7 @@ export const neonDb = {
   },
 
   async getAllProducts(params?: { includeHidden?: boolean }): Promise<Product[]> {
-    const pageSize = 400;
+    const pageSize = params?.includeHidden ? 400 : 100;
     const first = await this.getProducts({ limit: pageSize, offset: 0, includeHidden: params?.includeHidden });
     if (first.total <= pageSize) return first.products;
     const remaining = await Promise.all(
@@ -150,7 +170,7 @@ export const neonDb = {
       return await callStore('getProducts', [params]);
     }
     return await callPublicStoreGet('getProducts', {
-      limit: Math.max(1, Math.min(500, Number(params?.limit) || 50)),
+      limit: Math.max(1, Math.min(100, Number(params?.limit) || 50)),
       offset: Math.max(0, Number(params?.offset) || 0),
       category: params?.category && params.category !== 'all' ? params.category : undefined,
       search: params?.search?.trim() || undefined,
@@ -280,5 +300,10 @@ export const neonDb = {
   // Payment Gateway Config RPCs (Kashier / Paymob)
   async getPaymentGatewayAdminConfig() { return callStore('getPaymentGatewayAdminConfig', []); },
   async savePaymentGatewayConfig(config: any) { return callAction('savePaymentGatewayConfig', [config]); },
-  async testPaymentGatewayConfig() { return callAction('testPaymentGatewayConfig', []); }
+  async testPaymentGatewayConfig() { return callAction('testPaymentGatewayConfig', []); },
+
+  // Anti-Scraping Shield & Meta Feed Security RPCs
+  async getSecurityShieldReport() { return callStore('getSecurityShieldReport', []); },
+  async getMetaFeedConfig() { return callStore('getMetaFeedConfig', []); },
+  async rotateMetaFeedToken() { return callAction('rotateMetaFeedToken', []); }
 };

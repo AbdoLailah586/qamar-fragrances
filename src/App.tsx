@@ -18,6 +18,7 @@ import { OrderTracking } from './pages/OrderTracking';
 import { Profile } from './pages/Profile';
 import { PolicyPage } from './pages/PolicyPage';
 import { CookieBanner } from './components/CookieBanner';
+import { ContentProtection } from './components/ContentProtection';
 
 // Lazy-load the Admin ERP so customer storefront bundles remain lightweight and fast
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
@@ -43,9 +44,10 @@ const StorefrontRouter: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-white">
+    <div className="min-h-screen flex flex-col bg-white qamar-no-copy">
       <PwaStatus />
       <Navbar />
+      <ContentProtection />
       <div key={routeKey} className="flex-1 qamar-page-enter">
         {currentTab === 'home' && <Home />}
         {currentTab === 'shop' && <Shop />}

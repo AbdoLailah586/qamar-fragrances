@@ -1,6 +1,7 @@
 import { neon } from '@neondatabase/serverless';
 import { currentUser, sameOrigin } from '../lib/session.js';
 import { canAccessSection } from '../lib/access.js';
+import { enforceRateLimitOr429, verifyBotIdIfActive } from '../lib/rateLimit.js';
 import nodemailer from 'nodemailer';
 import { randomInt } from 'node:crypto';
 
@@ -13,6 +14,8 @@ export default async function handler(req, res) {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     const { email, name = 'عميلنا العزيز', customTemplate } = body || {};
     if (!sameOrigin(req)) return res.status(403).json({ success: false, error: 'الطلب يجب أن يأتي من المتجر نفسه.' });
+    const botCheck = await verifyBotIdIfActive(req, 'basic');
+    if (botCheck.blocked) return res.status(403).json({ success: false, error: 'تم حظر الطلب الآلي بواسطة نظام الحماية.' });
     if (customTemplate && !canAccessSection(await currentUser(req), 'emails')) {
       return res.status(403).json({ success: false, error: 'تجربة القوالب تحتاج صلاحية البريد.' });
     }
@@ -24,6 +27,16 @@ export default async function handler(req, res) {
     const cleanEmail = email.trim().toLowerCase();
     const otpCode = randomInt(100000, 1000000).toString();
     const sql = neon(DB_URL);
+
+    const rl = await enforceRateLimitOr429(req, res, sql, {
+      bucket: 'send_otp_ip',
+      maxHits: 6,
+      windowSeconds: 900,
+      blockSeconds: 900,
+      path: '/api/send-otp',
+      message: 'تم إرسال رموز تحقق كثيرة من هذا الجهاز. انتظر 15 دقيقة ثم أعد المحاولة.'
+    });
+    if (rl.limited) return res.status(429).json({ success: false, error: rl.error });
 
     const recent = await sql`SELECT COUNT(*)::int AS count FROM email_verifications WHERE email=${cleanEmail} AND created_at>NOW()-INTERVAL '1 hour'`;
     if (recent[0]?.count >= 5) return res.status(429).json({ success: false, error: 'تم طلب أكواد كثيرة. انتظر قليلاً.' });

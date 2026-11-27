@@ -1438,4 +1438,203 @@ describe('Online Payment Gateway Infrastructure (Kashier / Paymob) & Liquid Glas
     const appSrc = readFileSync(resolve(ROOT, 'src/App.tsx'), 'utf8');
     assert.match(appSrc, /CookieBanner/);
   });
+
+  test('Anti-k6 Edge Middleware blocks k6, scrapers, and direct API calls without PoW shield while allowing verified crawlers & valid PoW', async () => {
+    const edgeShield = await import(pathToFileURL(resolve(ROOT, 'lib/edgeShield.js')).href);
+    const mwMod = await import(pathToFileURL(resolve(ROOT, 'middleware.ts')).href);
+    const middleware = mwMod.default;
+    edgeShield.resetEdgeMemoryRatesForTest();
+
+    // 1. Default k6 load tester blocked immediately (403) on storefront & API
+    for (const targetUrl of ['https://qamar-fragrances.com/ar', 'https://qamar-fragrances.com/api/store?method=getProducts']) {
+      const k6Res = await middleware(new Request(targetUrl, {
+        headers: { 'user-agent': 'k6/0.51.0 (https://k6.io/)', 'x-forwarded-for': '198.51.100.10' }
+      }));
+      assert.equal(k6Res.status, 403, `Expected k6 to be blocked with 403 on ${targetUrl}`);
+    }
+
+    // 2. Python/curl/HTTrack/Puppeteer scrapers blocked immediately (403)
+    for (const badUa of ['python-requests/2.31.0', 'Scrapy/2.11.0', 'HTTrack 3.49', 'curl/8.4.0']) {
+      const scraperRes = await middleware(new Request('https://qamar-fragrances.com/ar', {
+        headers: { 'user-agent': badUa, 'x-forwarded-for': '198.51.100.11' }
+      }));
+      assert.equal(scraperRes.status, 403, `Expected ${badUa} to be blocked`);
+    }
+
+    // 3. Spoofed Chrome UA hitting /api/store directly without Edge PoW cookie -> 403 SHIELD_CHALLENGE_REQUIRED
+    const chromeUa = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36';
+    const unverifiedApi = await middleware(new Request('https://qamar-fragrances.com/api/store?method=getProducts', {
+      headers: { 'user-agent': chromeUa, 'x-forwarded-for': '198.51.100.12' }
+    }));
+    assert.equal(unverifiedApi.status, 403);
+    const apiBody = await unverifiedApi.json();
+    assert.equal(apiBody.code, 'SHIELD_CHALLENGE_REQUIRED');
+
+    // 4. First-visit spoofed Chrome on /ar receives tiny PoW HTML interstitial, then real browser solves PoW and unlocks API
+    const pageChallengeRes = await middleware(new Request('https://qamar-fragrances.com/ar', {
+      headers: { 'user-agent': chromeUa, accept: 'text/html', 'x-forwarded-for': '198.51.100.12' }
+    }));
+    assert.equal(pageChallengeRes.status, 200);
+    const challengeHtml = await pageChallengeRes.text();
+    assert.match(challengeHtml, /\/__qamar_shield/);
+
+    const m = challengeHtml.match(/var ch=(\{.*?\});/);
+    assert.ok(m, 'Challenge JSON payload must be embedded');
+    const ch = JSON.parse(m[1]);
+    const enc = new TextEncoder();
+    let solvedNonce = '';
+    for (let n = 0; n < 200000; n += 1) {
+      const digest = await crypto.subtle.digest('SHA-256', enc.encode(`${ch.seed}:${n}`));
+      if (edgeShield.hasLeadingZeroBits(new Uint8Array(digest), ch.difficulty)) {
+        solvedNonce = String(n);
+        break;
+      }
+    }
+    assert.ok(solvedNonce, 'Must solve PoW challenge within bound');
+
+    const verifyRes = await middleware(new Request('https://qamar-fragrances.com/__qamar_shield', {
+      method: 'POST',
+      headers: { 'user-agent': chromeUa, 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.12' },
+      body: JSON.stringify({ seed: ch.seed, expiresAt: ch.expiresAt, sig: ch.sig, nonce: solvedNonce })
+    }));
+    assert.equal(verifyRes.status, 200);
+    const setCookie = verifyRes.headers.get('set-cookie') || '';
+    const cookiePair = setCookie.split(';')[0];
+    assert.ok(cookiePair.startsWith('__qamar_shield='));
+
+    // With valid signed cookie, real browser passes cleanly
+    const authedApiRes = await middleware(new Request('https://qamar-fragrances.com/api/store?method=getProducts', {
+      headers: { 'user-agent': chromeUa, cookie: cookiePair, 'x-forwarded-for': '198.51.100.12' }
+    }));
+    assert.notEqual(authedApiRes.status, 403);
+
+    // 5. Verified crawlers allowed on storefront/OG preview ONLY, blocked from /api/store
+    const fbOgRes = await middleware(new Request('https://qamar-fragrances.com/ar/product/all/test', {
+      headers: { 'user-agent': 'facebookexternalhit/1.1', 'x-forwarded-for': '198.51.100.13' }
+    }));
+    assert.notEqual(fbOgRes.status, 403);
+    const fbApiRes = await middleware(new Request('https://qamar-fragrances.com/api/store?method=getProducts', {
+      headers: { 'user-agent': 'facebookexternalhit/1.1', 'x-forwarded-for': '198.51.100.13' }
+    }));
+    assert.equal(fbApiRes.status, 403);
+
+    // 6. Edge burst limiter throttles flood to 429 Too Many Requests
+    let saw429 = false;
+    for (let i = 0; i < 20; i += 1) {
+      const r = await middleware(new Request('https://qamar-fragrances.com/api/send-otp', {
+        method: 'POST',
+        headers: { 'user-agent': chromeUa, 'x-forwarded-for': '198.51.100.99' }
+      }));
+      if (r.status === 429) { saw429 = true; break; }
+    }
+    assert.equal(saw429, true, 'Expected 429 burst throttle on rapid Auth calls');
+  });
+
+  test('Distributed rate limiter blocks brute-force sign-in & tracking floods (429), BotID blocks bots (403), and Meta feed enforces secret token', async () => {
+    const rateLimitMod = await import(pathToFileURL(resolve(ROOT, 'lib/rateLimit.js')).href);
+    rateLimitMod.resetRateLimiterMemoryForTest();
+
+    // 1. Sign-in brute-force rate limiter (10 attempts per IP -> 11th rejected with 429 + Retry-After)
+    for (let i = 0; i < 10; i += 1) {
+      const reqTry = createMockReq({
+        method: 'POST',
+        headers: { origin: 'https://qamar-fragrances.com', 'x-forwarded-for': '203.0.113.50' },
+        body: { method: 'authenticateUser', args: [`user${i}@example.com`, 'wrongpass'] }
+      });
+      const resTry = createMockRes();
+      await storeApi.default(reqTry, resTry, { sql: async () => [], store: {}, user: null, skipBotId: true });
+      assert.equal(resTry.statusCode, 401);
+    }
+    const reqBlocked = createMockReq({
+      method: 'POST',
+      headers: { origin: 'https://qamar-fragrances.com', 'x-forwarded-for': '203.0.113.50' },
+      body: { method: 'authenticateUser', args: ['victim@example.com', 'wrongpass'] }
+    });
+    const resBlocked = createMockRes();
+    await storeApi.default(reqBlocked, resBlocked, { sql: async () => [], store: {}, user: null, skipBotId: true });
+    assert.equal(resBlocked.statusCode, 429);
+    assert.ok(Number(resBlocked.headers['retry-after']) > 0);
+
+    // 2. Per-email brute force across rotating IPs (8 attempts per email -> 9th from a brand new IP hits 429!)
+    for (let i = 0; i < 8; i += 1) {
+      const reqEmail = createMockReq({
+        method: 'POST',
+        headers: { origin: 'https://qamar-fragrances.com', 'x-forwarded-for': `203.0.114.${i + 10}` },
+        body: { method: 'authenticateUser', args: ['targeted@qamar.eg', 'badpass'] }
+      });
+      await storeApi.default(reqEmail, createMockRes(), { sql: async () => [], store: {}, user: null, skipBotId: true });
+    }
+    const reqEmailLocked = createMockReq({
+      method: 'POST',
+      headers: { origin: 'https://qamar-fragrances.com', 'x-forwarded-for': '203.0.114.250' },
+      body: { method: 'authenticateUser', args: ['targeted@qamar.eg', 'badpass'] }
+    });
+    const resEmailLocked = createMockRes();
+    await storeApi.default(reqEmailLocked, resEmailLocked, { sql: async () => [], store: {}, user: null, skipBotId: true });
+    assert.equal(resEmailLocked.statusCode, 429);
+
+    // 3. BotID active verdict blocks automated login cleanly with 403
+    const reqBotId = createMockReq({
+      method: 'POST',
+      headers: { origin: 'https://qamar-fragrances.com', 'x-forwarded-for': '203.0.115.1' },
+      body: { method: 'authenticateUser', args: ['bot@qamar.eg', '123456'] }
+    });
+    const resBotId = createMockRes();
+    await storeApi.default(reqBotId, resBotId, {
+      sql: async () => [],
+      store: {},
+      user: null,
+      checkBotId: async () => ({ isBot: true, isVerifiedBot: false, bypassed: false })
+    });
+    assert.equal(resBotId.statusCode, 403);
+
+    // 4. Meta feed rejects missing or wrong token when feedToken is active, accepts matching token
+    const sampleFeedProducts = [{ id: 'p1', name_ar: 'عطر محمي', price: 300, images: ['/qamar-images/img1.webp'], specs: {} }];
+    const makeTextRes = () => ({
+      statusCode: 200,
+      headers: {},
+      body: '',
+      setHeader(k, v) { this.headers[k.toLowerCase()] = v; },
+      status(c) { this.statusCode = c; return this; },
+      send(b) { this.body = b; return this; }
+    });
+    const missingTokRes = makeTextRes();
+    await metaFeedApi.default(
+      { url: '/api/meta-feed?format=csv', headers: { host: 'qamar-fragrances.com', 'x-forwarded-for': '203.0.116.5' } },
+      missingTokRes,
+      { products: sampleFeedProducts, feedToken: 'secret-feed-xyz' }
+    );
+    assert.equal(missingTokRes.statusCode, 403);
+
+    const validTokRes = makeTextRes();
+    await metaFeedApi.default(
+      { url: '/api/meta-feed?format=csv&token=secret-feed-xyz', headers: { host: 'qamar-fragrances.com', 'x-forwarded-for': '203.0.116.5' } },
+      validTokRes,
+      { products: sampleFeedProducts, feedToken: 'secret-feed-xyz' }
+    );
+    assert.equal(validTokRes.statusCode, 200);
+    assert.equal(validTokRes.headers['cache-control'], 'private, no-store');
+
+    // 5. Public getStoreSettings never leaks meta_feed_token
+    const getSettingsRes = createMockRes();
+    await storeApi.default(
+      createMockReq({ method: 'GET', query: { method: 'getStoreSettings' }, headers: { 'x-forwarded-for': '203.0.116.9' } }),
+      getSettingsRes,
+      { sql: async () => [], store: { async getStoreSettings() { return { store_name: 'Qamar', meta_feed_token: 'super-secret-feed' }; } } }
+    );
+    assert.equal(getSettingsRes.statusCode, 200);
+    assert.equal(getSettingsRes.body.result.meta_feed_token, undefined);
+
+    // 6. Frontend watermark, anti-copy deterrent, BotID client init, and disabled sourcemaps present
+    const cardSrc = readFileSync(resolve(ROOT, 'src/components/ProductCard.tsx'), 'utf8');
+    const detailsSrc = readFileSync(resolve(ROOT, 'src/pages/ProductDetails.tsx'), 'utf8');
+    const appSrc = readFileSync(resolve(ROOT, 'src/App.tsx'), 'utf8');
+    const mainSrc = readFileSync(resolve(ROOT, 'src/main.tsx'), 'utf8');
+    const viteSrc = readFileSync(resolve(ROOT, 'vite.config.ts'), 'utf8');
+    assert.match(cardSrc, /WatermarkOverlay/);
+    assert.match(detailsSrc, /WatermarkOverlay/);
+    assert.match(appSrc, /ContentProtection/);
+    assert.match(mainSrc, /initBotId/);
+    assert.match(viteSrc, /sourcemap:\s*false/);
+  });
 });

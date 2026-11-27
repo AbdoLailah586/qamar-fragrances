@@ -36,6 +36,28 @@ a {
   scrollbar-width: none;
 }
 
+.qamar-no-copy {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.qamar-no-copy img {
+  -webkit-user-drag: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.qamar-no-copy input,
+.qamar-no-copy textarea,
+.qamar-no-copy select,
+.qamar-no-copy [contenteditable="true"],
+.qamar-no-copy [data-allow-copy="true"] {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  -webkit-touch-callout: default !important;
+}
+
 /* Luxury Motion & Page Transitions */
 @keyframes qamarPageEnter {
   from {

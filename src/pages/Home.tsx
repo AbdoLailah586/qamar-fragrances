@@ -38,11 +38,15 @@ export const Home: React.FC = () => {
         <img
           src={settings.hero_image || '/qamar-images/a182f7810c27ec59.webp'}
           alt={settings.hero_heading}
+          draggable={false}
+          onContextMenu={e => e.preventDefault()}
           className="hidden md:block absolute inset-0 w-full h-full object-cover qamar-hero-kenburns transition-transform duration-1000 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:scale-[1.03]"
         />
         <img
           src={settings.hero_mobile_image || settings.hero_image || '/qamar-images/66b77b422345ca7e.webp'}
           alt={settings.hero_heading}
+          draggable={false}
+          onContextMenu={e => e.preventDefault()}
           className="md:hidden absolute inset-0 w-full h-full object-cover qamar-hero-kenburns"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/30 to-black/15 md:bg-gradient-to-b md:from-black/20 md:via-black/25 md:to-black/40" />

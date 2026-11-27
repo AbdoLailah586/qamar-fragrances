@@ -3,6 +3,7 @@ import { Heart } from 'lucide-react';
 import type { Product } from '../types';
 import { useStore } from '../context/StoreContext';
 import { formatEGP } from '../utils/arabicNumbers';
+import { WatermarkOverlay } from './WatermarkOverlay';
 
 interface Props {
   product: Product;
@@ -34,6 +35,9 @@ export const ProductCard: React.FC<Props> = ({ product, index = 0 }) => {
               src={primaryImage}
               alt={product.name_ar}
               loading="lazy"
+              draggable={false}
+              onDragStart={e => e.preventDefault()}
+              onContextMenu={e => e.preventDefault()}
               className={`w-full h-full object-cover will-change-transform transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] ${
                 secondaryImage
                   ? 'group-hover:opacity-0 group-hover:scale-105'
@@ -47,9 +51,13 @@ export const ProductCard: React.FC<Props> = ({ product, index = 0 }) => {
                 src={secondaryImage}
                 alt={`${product.name_ar} — صورة إضافية`}
                 loading="lazy"
+                draggable={false}
+                onDragStart={e => e.preventDefault()}
+                onContextMenu={e => e.preventDefault()}
                 className="absolute inset-0 w-full h-full object-cover opacity-0 scale-100 will-change-transform transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:opacity-100 group-hover:scale-[1.06]"
               />
             )}
+            <WatermarkOverlay compact />
           </button>
 
           {secondaryImage && (

@@ -76,7 +76,7 @@ export const OrderSuccess: React.FC = () => {
                 : 'تم استلام طلبك بنجاح!'}
         </h1>
         <p className="text-sm text-gray-500">
-          رقم طلبك هو <span className="font-bold text-[#fe9931]" dir="ltr">{orderNumber}</span>
+          رقم طلبك هو <span data-allow-copy="true" className="font-bold text-[#fe9931] select-text" dir="ltr">{orderNumber}</span>
         </p>
 
         {isGatewayPaid ? (

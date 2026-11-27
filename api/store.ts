@@ -7,6 +7,11 @@ import { normalizePhone } from '../src/utils/deliveryAddress.js';
 import { saveOrder, cancelOrder as cancelStoredOrder } from '../server/orderWrites.js';
 import { buildServerOrderWhatsAppMessage, dispatchWhatsAppViaCrm, resolveCrmConfig } from '../server/whatsappCrm.js';
 import {
+  enforceRateLimitOr429,
+  getRateLimitSecurityReport,
+  verifyBotIdIfActive
+} from '../lib/rateLimit.js';
+import {
   stripPaymentSecrets,
   toPublicPaymentGatewayState,
   shouldRouteOrderToGateway,
@@ -65,7 +70,10 @@ const policies: Record<string, string[]> = {
   sendTestWhatsApp: ['whatsapp', 'settings'],
   getPaymentGatewayAdminConfig: ['settings'],
   savePaymentGatewayConfig: ['settings'],
-  testPaymentGatewayConfig: ['settings']
+  testPaymentGatewayConfig: ['settings'],
+  getSecurityShieldReport: ['security'],
+  getMetaFeedConfig: ['overview', 'products', 'settings'],
+  rotateMetaFeedToken: ['security', 'settings']
 };
 
 function safeSettings(settings: any) {
@@ -74,6 +82,7 @@ function safeSettings(settings: any) {
   delete copy.whatsapp_automation_url;
   delete copy.whatsapp_automation_email;
   delete copy.whatsapp_automation_pass;
+  delete copy.meta_feed_token;
   copy.payment_gateway_public = toPublicPaymentGatewayState(settings);
   return copy;
 }
@@ -129,6 +138,17 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
   if (method === 'logout') { await endSession(req, res, sql); return true; }
 
   if (method === 'completeSecondFactor') {
+    if (!deps?.skipRateLimit) {
+      const rl = await enforceRateLimitOr429(req, res, sql, {
+        bucket: 'auth_2fa_ip',
+        maxHits: 10,
+        windowSeconds: 900,
+        blockSeconds: 900,
+        path: '/api/store:completeSecondFactor',
+        message: 'تم تجاوز محاولات التحقق الثنائي. انتظر 15 دقيقة ثم أعد المحاولة.'
+      });
+      if (rl.limited) throw Object.assign(fail(429, rl.error), { code: 'RATE_LIMITED' });
+    }
     const pending = await pendingSecondFactor(req, sql);
     if (!pending || !pending.totp_enabled || !verifyTotpCode(pending.totp_secret, args[0])) {
       throw Object.assign(fail(401, 'كود المصادقة غير صحيح أو انتهت جلسة التحقق.'), { code: 'TOTP_INVALID' });
@@ -142,7 +162,33 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
   if (method === 'authenticateUser') {
     const [email, password] = args;
     if (typeof email !== 'string' || typeof password !== 'string' || password.length > 512) throw fail(400, 'بيانات الدخول غير صالحة.');
-    const rows = await sql`SELECT * FROM users WHERE lower(email)=${email.trim().toLowerCase()} LIMIT 1`;
+    const cleanEmail = email.trim().toLowerCase();
+    if (!deps?.skipBotId) {
+      const botCheck = await verifyBotIdIfActive(req, 'basic', deps);
+      if (botCheck.blocked) throw Object.assign(fail(403, 'تم رصد طلب آلي غير مصرح به في تسجيل الدخول.'), { code: 'BOT_BLOCKED' });
+    }
+    if (!deps?.skipRateLimit) {
+      const rlIp = await enforceRateLimitOr429(req, res, sql, {
+        bucket: 'signin_ip',
+        maxHits: 10,
+        windowSeconds: 900,
+        blockSeconds: 900,
+        path: '/api/store:authenticateUser',
+        message: 'تم تجاوز الحد المسموح لمحاولات تسجيل الدخول من هذا الجهاز. انتظر 15 دقيقة ثم حاول مجدداً.'
+      });
+      if (rlIp.limited) throw Object.assign(fail(429, rlIp.error), { code: 'RATE_LIMITED' });
+      const rlEmail = await enforceRateLimitOr429(req, res, sql, {
+        bucket: 'signin_email',
+        scopeKey: cleanEmail,
+        maxHits: 8,
+        windowSeconds: 900,
+        blockSeconds: 900,
+        path: '/api/store:authenticateUser',
+        message: 'تم تقييد محاولات الدخول لهذا الحساب مؤقتاً لحمايته. انتظر 15 دقيقة.'
+      });
+      if (rlEmail.limited) throw Object.assign(fail(429, rlEmail.error), { code: 'RATE_LIMITED' });
+    }
+    const rows = await sql`SELECT * FROM users WHERE lower(email)=${cleanEmail} LIMIT 1`;
     const row = rows[0];
     if (!row || !passwordMatches(password, row.password_hash)) {
       throw fail(401, 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
@@ -161,6 +207,21 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
       throw fail(400, 'أدخل اسم وبريد إلكتروني وكلمة مرور صالحة (6 أحرف على الأقل).');
     }
     const cleanEmail = email.trim().toLowerCase();
+    if (!deps?.skipBotId) {
+      const botCheck = await verifyBotIdIfActive(req, 'basic', deps);
+      if (botCheck.blocked) throw Object.assign(fail(403, 'تم حظر التسجيل الآلي بواسطة نظام الحماية.'), { code: 'BOT_BLOCKED' });
+    }
+    if (!deps?.skipRateLimit) {
+      const rl = await enforceRateLimitOr429(req, res, sql, {
+        bucket: 'register_ip',
+        maxHits: 6,
+        windowSeconds: 1800,
+        blockSeconds: 1800,
+        path: '/api/store:registerCustomer',
+        message: 'تم تجاوز حد إنشاء الحسابات المسموح به. انتظر 30 دقيقة ثم حاول مجدداً.'
+      });
+      if (rl.limited) throw Object.assign(fail(429, rl.error), { code: 'RATE_LIMITED' });
+    }
     const existing = await sql`SELECT id FROM users WHERE lower(email)=${cleanEmail} LIMIT 1`;
     if (existing.length) throw fail(409, 'هذا البريد الإلكتروني مسجل بالفعل. قم بتسجيل الدخول.');
     const userId = `usr-${Date.now()}-${randomBytes(4).toString('hex')}`;
@@ -225,7 +286,8 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
     const params = { ...(args[0] || {}) };
     const privileged = hasAny(user, productSections);
     params.includeHidden = privileged && params.includeHidden === true;
-    params.limit = Math.max(1, Math.min(500, Number(params.limit) || 50));
+    const maxAllowed = privileged ? 500 : 100;
+    params.limit = Math.max(1, Math.min(maxAllowed, Number(params.limit) || 50));
     params.offset = Math.max(0, Number(params.offset) || 0);
     const result = await store.getProducts(params);
     return { ...result, products: result.products.map((p: any) => safeProduct(p, privileged)) };
@@ -251,6 +313,7 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
       ...incoming,
       whatsapp_auto_triggers: incoming.whatsapp_auto_triggers ?? current.whatsapp_auto_triggers,
       policy_pages: incoming.policy_pages ?? current.policy_pages,
+      meta_feed_token: current.meta_feed_token,
       whatsapp_automation_url: current.whatsapp_automation_url,
       whatsapp_automation_email: current.whatsapp_automation_email,
       whatsapp_automation_pass: current.whatsapp_automation_pass,
@@ -358,6 +421,16 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
     }
     const accessHash = createHash('sha256').update(token).digest('hex');
     if (method === 'findOrCreateSupportTicket' || method === 'createSupportTicket') {
+      if (!deps?.skipRateLimit) {
+        const rlSup = await enforceRateLimitOr429(req, res, sql, {
+          bucket: 'support_ticket_ip',
+          maxHits: 10,
+          windowSeconds: 900,
+          blockSeconds: 900,
+          path: '/api/store:supportTicket'
+        });
+        if (rlSup.limited) throw Object.assign(fail(429, rlSup.error), { code: 'RATE_LIMITED' });
+      }
       const phone = normalizePhone(String(args[0] || ''));
       if (phone.length !== 11) throw fail(400, 'أدخل رقم هاتف مصري صحيح.');
       const existing = await sql`SELECT * FROM support_tickets WHERE access_hash=${accessHash} AND customer_phone=${phone} AND status IN ('open','pending','escalated') ORDER BY created_at DESC LIMIT 1`;
@@ -485,7 +558,44 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
     return true;
   }
 
+  if (method === 'getSecurityShieldReport') {
+    return getRateLimitSecurityReport(sql);
+  }
+
+  if (method === 'getMetaFeedConfig') {
+    const current = (await store.getStoreSettings().catch(() => null)) || {};
+    let token = String(current.meta_feed_token || process.env.META_FEED_SECRET || '').trim();
+    if (!token && typeof store.updateStoreSettings === 'function') {
+      token = randomBytes(24).toString('hex');
+      await store.updateStoreSettings({ ...current, meta_feed_token: token }).catch(() => {});
+    }
+    return { token, hasToken: Boolean(token) };
+  }
+
+  if (method === 'rotateMetaFeedToken') {
+    const current = (await store.getStoreSettings().catch(() => null)) || {};
+    const token = randomBytes(24).toString('hex');
+    if (typeof store.updateStoreSettings === 'function') {
+      await store.updateStoreSettings({ ...current, meta_feed_token: token });
+    }
+    if (!deps) {
+      await logAudit({ actorId: user?.id, actorName: user?.name, action: 'META_FEED_TOKEN_ROTATED', entity: 'settings', entityId: 'main' });
+    }
+    return { success: true, token };
+  }
+
   if (method === 'trackOrder') {
+    if (!deps?.skipRateLimit) {
+      const rl = await enforceRateLimitOr429(req, res, sql, {
+        bucket: 'track_order_ip',
+        maxHits: 15,
+        windowSeconds: 600,
+        blockSeconds: 600,
+        path: '/api/store:trackOrder',
+        message: 'تم تجاوز محاولات تتبع الطلبات مؤقتاً. انتظر قليلاً ثم أعد المحاولة.'
+      });
+      if (rl.limited) throw Object.assign(fail(429, rl.error), { code: 'RATE_LIMITED' });
+    }
     const number = String(args[0] || '').trim().replace(/^#/, '').toUpperCase();
     const phone = normalizePhone(String(args[1] || ''));
     if (!/^QMR-[A-Z0-9-]{4,80}$/.test(number) || phone.length !== 11) throw fail(400, 'اكتب رقم الطلب ورقم الهاتف المسجل معًا.');
@@ -494,6 +604,21 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
   }
 
   if (method === 'createOrder') {
+    if (!deps?.skipBotId) {
+      const botCheck = await verifyBotIdIfActive(req, 'basic', deps);
+      if (botCheck.blocked) throw Object.assign(fail(403, 'تم حظر محاولة الطلب الآلي بواسطة نظام الحماية.'), { code: 'BOT_BLOCKED' });
+    }
+    if (!deps?.skipRateLimit) {
+      const rl = await enforceRateLimitOr429(req, res, sql, {
+        bucket: 'create_order_ip',
+        maxHits: 12,
+        windowSeconds: 600,
+        blockSeconds: 600,
+        path: '/api/store:createOrder',
+        message: 'تم إرسال عدد كبير من الطلبات خلال دقائق. يرجى الانتظار قليلاً أو التواصل عبر واتساب.'
+      });
+      if (rl.limited) throw Object.assign(fail(429, rl.error), { code: 'RATE_LIMITED' });
+    }
     const order = args[0];
     if (!order || !Array.isArray(order.items) || !order.items.length || order.items.length > 100) throw fail(400, 'الطلب غير صالح.');
     if (!Number.isFinite(order.shipping_fee) || order.shipping_fee < 0 || !Number.isFinite(order.subtotal) || !Number.isFinite(order.total) || Math.abs(order.total - order.subtotal - order.shipping_fee) > 0.011) {
@@ -610,6 +735,16 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
   }
 
   if (method === 'submitProductReview') {
+    if (!deps?.skipRateLimit) {
+      const rl = await enforceRateLimitOr429(req, res, sql, {
+        bucket: 'review_submit_ip',
+        maxHits: 10,
+        windowSeconds: 900,
+        blockSeconds: 900,
+        path: '/api/store:submitProductReview'
+      });
+      if (rl.limited) throw Object.assign(fail(429, rl.error), { code: 'RATE_LIMITED' });
+    }
     const data = args[0] || {};
     return store.submitProductReview({ ...data, user_id: user?.id || data.user_id });
   }
@@ -648,7 +783,19 @@ export default async function handler(req: any, res: any, deps?: any) {
   res.setHeader('Cache-Control', 'no-store');
   if (!sameOrigin(req)) return res.status(403).json({ error: 'الطلب يجب أن يأتي من المتجر نفسه.' });
 
+  const reqSql = deps?.sql || database();
+
   if (req.method === 'GET') {
+    if (!deps?.skipRateLimit) {
+      const rlGet = await enforceRateLimitOr429(req, res, reqSql, {
+        bucket: 'api_get_ip',
+        maxHits: 75,
+        windowSeconds: 60,
+        blockSeconds: 120,
+        path: '/api/store[GET]'
+      });
+      if (rlGet.limited) return res.status(429).json({ error: rlGet.error, code: 'RATE_LIMITED' });
+    }
     const parsed = parsePublicGetRequest(req.url);
     if (!parsed) return res.status(405).json({ error: 'Method Not Allowed' });
     try {
@@ -669,6 +816,16 @@ export default async function handler(req: any, res: any, deps?: any) {
   }
 
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
+  if (!deps?.skipRateLimit) {
+    const rlPost = await enforceRateLimitOr429(req, res, reqSql, {
+      bucket: 'api_post_ip',
+      maxHits: 80,
+      windowSeconds: 60,
+      blockSeconds: 120,
+      path: '/api/store[POST]'
+    });
+    if (rlPost.limited) return res.status(429).json({ error: rlPost.error, code: 'RATE_LIMITED' });
+  }
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     if (JSON.stringify(body).length > 3_000_000) return res.status(413).json({ error: 'حجم الطلب أكبر من المسموح.' });

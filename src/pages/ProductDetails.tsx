@@ -7,6 +7,7 @@ import { formatEGP } from '../utils/arabicNumbers';
 import { applyPageSeo, buildProductJsonLd } from '../utils/seo';
 import { buildProductAdUrl } from '../utils/adLinks';
 import { ProductCard } from '../components/ProductCard';
+import { WatermarkOverlay } from '../components/WatermarkOverlay';
 import type { FragranceNotesEntry } from '../types';
 
 export const ProductDetails: React.FC = () => {
@@ -153,6 +154,9 @@ export const ProductDetails: React.FC = () => {
                 <img
                   src={img}
                   alt={activeImgIdx === idx ? product.name_ar : ''}
+                  draggable={false}
+                  onDragStart={e => e.preventDefault()}
+                  onContextMenu={e => e.preventDefault()}
                   style={{
                     transformOrigin: zoomOrigin,
                     transform: activeImgIdx === idx && isZooming ? 'scale(1.42)' : 'scale(1)'
@@ -161,6 +165,7 @@ export const ProductDetails: React.FC = () => {
                 />
               </div>
             ))}
+            <WatermarkOverlay />
             <span className="hidden md:inline-block pointer-events-none absolute bottom-3 left-3 px-2.5 py-1 rounded-full bg-white/85 backdrop-blur-sm text-[11px] font-bold text-[#4f4335] opacity-80 group-hover:opacity-0 transition-opacity duration-300 shadow-xs z-10">
               مرّر للتكبير ✨
             </span>

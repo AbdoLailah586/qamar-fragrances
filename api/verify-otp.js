@@ -1,6 +1,7 @@
 import { neon } from '@neondatabase/serverless';
 import { issueSession, sameOrigin, passwordHash } from '../lib/session.js';
 import { publicUser, OWNER_EMAIL } from '../lib/access.js';
+import { enforceRateLimitOr429, verifyBotIdIfActive } from '../lib/rateLimit.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -9,6 +10,8 @@ export default async function handler(req, res) {
 
   try {
     if (!sameOrigin(req)) return res.status(403).json({ success: false, error: 'مصدر الطلب غير مسموح.' });
+    const botCheck = await verifyBotIdIfActive(req, 'basic');
+    if (botCheck.blocked) return res.status(403).json({ success: false, error: 'تم حظر الطلب الآلي بواسطة نظام الحماية.' });
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     const { email, code, name, phone, password } = body || {};
     if (!email || !code) return res.status(400).json({ success: false, error: 'البريد الإلكتروني وكود التأكيد مطلوبان.' });
@@ -16,6 +19,16 @@ export default async function handler(req, res) {
     const cleanEmail = email.trim().toLowerCase();
     const cleanCode = code.trim();
     const sql = neon(process.env.DATABASE_URL || '');
+
+    const rl = await enforceRateLimitOr429(req, res, sql, {
+      bucket: 'verify_otp_ip',
+      maxHits: 10,
+      windowSeconds: 900,
+      blockSeconds: 900,
+      path: '/api/verify-otp',
+      message: 'تم تجاوز محاولات إدخال رمز التحقق. انتظر 15 دقيقة ثم أعد المحاولة.'
+    });
+    if (rl.limited) return res.status(429).json({ success: false, error: rl.error });
 
     const rows = await sql`
       UPDATE email_verifications SET attempts=attempts+1

@@ -1,4 +1,13 @@
 import { neon } from '@neondatabase/serverless';
+import { timingSafeEqual } from 'node:crypto';
+import { enforceRateLimitOr429 } from '../lib/rateLimit.js';
+
+function tokensEqual(a, b) {
+  const sa = String(a || '');
+  const sb = String(b || '');
+  if (!sa || sa.length !== sb.length) return false;
+  return timingSafeEqual(Buffer.from(sa), Buffer.from(sb));
+}
 
 function toFullUrl(baseUrl, pathOrUrl) {
   const s = String(pathOrUrl || '').trim();
@@ -28,11 +37,42 @@ export default async function handler(req, res, deps) {
 
   const urlObj = new URL(req.url || '/api/meta-feed', 'http://localhost');
   const format = String(urlObj.searchParams.get('format') || req.query?.format || 'csv').toLowerCase();
+  const sql = deps?.sql || (process.env.DATABASE_URL ? neon(process.env.DATABASE_URL) : null);
+
+  if (!deps?.skipRateLimit) {
+    const rl = await enforceRateLimitOr429(req, res, sql, {
+      bucket: 'meta_feed_ip',
+      maxHits: 20,
+      windowSeconds: 600,
+      blockSeconds: 600,
+      path: '/api/meta-feed',
+      message: 'تم تجاوز حد طلبات ملف الكتالوج.'
+    });
+    if (rl.limited) return res.status(429).send('Too Many Requests');
+  }
+
+  let requiredToken = String(deps?.feedToken ?? process.env.META_FEED_SECRET ?? '').trim();
+  if (!requiredToken && !deps?.products && sql) {
+    try {
+      const sRows = await sql`SELECT settings->>'meta_feed_token' AS tok FROM store_settings WHERE id = 'main' LIMIT 1;`;
+      requiredToken = String(sRows?.[0]?.tok || '').trim();
+    } catch {}
+  }
+
+  // Require secret token on Meta feeds whenever configured (or in production DB mode when token is generated)
+  if (requiredToken || (!deps?.products && process.env.NODE_ENV === 'production')) {
+    const authHeader = String(req.headers?.authorization || '');
+    const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    const provided = String(urlObj.searchParams.get('token') || req.query?.token || req.headers?.['x-feed-token'] || bearer || '').trim();
+    if (!requiredToken || !tokensEqual(provided, requiredToken)) {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(403).send('Forbidden: Valid feed security token is required (?token=...)');
+    }
+  }
 
   let products = deps?.products || [];
-  if (!deps?.products && process.env.DATABASE_URL) {
+  if (!deps?.products && sql) {
     try {
-      const sql = neon(process.env.DATABASE_URL);
       products = await sql`
         SELECT id, handle, name_ar, name_en, brand, category, price, stock_quantity, images, specs
         FROM products
@@ -68,7 +108,10 @@ export default async function handler(req, res, deps) {
     };
   });
 
-  res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
+  res.setHeader(
+    'Cache-Control',
+    requiredToken ? 'private, no-store' : 'public, s-maxage=3600, stale-while-revalidate=86400'
+  );
 
   if (format === 'xml') {
     const itemsXml = normalized

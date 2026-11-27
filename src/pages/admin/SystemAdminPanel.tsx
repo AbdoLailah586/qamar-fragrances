@@ -91,6 +91,10 @@ export const SystemAdminPanel: React.FC<{ section: 'users' | 'security' | 'setti
   const [totpCode, setTotpCode] = useState('');
   const [formSettings, setFormSettings] = useState(settings);
   const [msg, setMsg] = useState('');
+  const [shieldReport, setShieldReport] = useState<{ activeBlocks: any[]; recentHighTraffic: any[] }>({
+    activeBlocks: [],
+    recentHighTraffic: []
+  });
 
   // WhatsApp Pro CRM State
   const [waUrl, setWaUrl] = useState('');
@@ -153,7 +157,10 @@ export const SystemAdminPanel: React.FC<{ section: 'users' | 'security' | 'setti
   };
 
   useEffect(() => {
-    if (section === 'security') neonDb.getAuditLog(100).then(setLogs).catch(() => {});
+    if (section === 'security') {
+      neonDb.getAuditLog(100).then(setLogs).catch(() => {});
+      neonDb.getSecurityShieldReport().then(r => { if (r) setShieldReport(r); }).catch(() => {});
+    }
     if (section === 'settings') setFormSettings(settings);
     if (section === 'whatsapp') void loadWhatsAppData();
   }, [section, settings]);
@@ -165,7 +172,71 @@ export const SystemAdminPanel: React.FC<{ section: 'users' | 'security' | 'setti
   if (section === 'security') {
     return (
       <div className="space-y-6">
-        <h1 className="text-xl font-extrabold text-[#252a31] flex items-center gap-2"><Shield className="w-5 h-5 text-[#fe9931]" /><span>الأمان والمصادقة الثنائية 2FA وسجل التدقيق</span></h1>
+        <h1 className="text-xl font-extrabold text-[#252a31] flex items-center gap-2"><Shield className="w-5 h-5 text-[#fe9931]" /><span>الأمان ومنع K6 والسكرابينج وRate Limiter</span></h1>
+
+        {/* Live Shield & Rate Limiter Card */}
+        <div className="bg-white border rounded-2xl p-5 space-y-4 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
+            <div>
+              <p className="font-extrabold text-sm text-[#252a31]">درع الحماية ضد K6 والسكرابينج والهجمات الآلية</p>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                حماية متعددة الطبقات: Vercel Edge PoW + حظر أدوات k6/Scrapers + BotID + Neon Distributed Rate Limiter + حماية علامة مائية على الصور.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => neonDb.getSecurityShieldReport().then(r => r && setShieldReport(r)).catch(() => {})}
+              className="px-3 py-1.5 rounded-full bg-gray-100 hover:bg-gray-200 font-bold text-[#252a31] flex items-center gap-1"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>تحديث السجل</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-[11px]">
+            <div className="p-3 rounded-xl bg-green-50 border border-green-200">
+              <p className="font-extrabold text-green-800">Edge Shield & PoW</p>
+              <p className="text-green-700 mt-0.5">حظر k6 / curl / Scrapers قبل السيرفر</p>
+            </div>
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200">
+              <p className="font-extrabold text-[#252a31]">Sign-In & OTP Limit</p>
+              <p className="text-gray-600 mt-0.5">دخول: 10/15د · OTP: 6/15د لكل IP</p>
+            </div>
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200">
+              <p className="font-extrabold text-[#252a31]">API & Order Limits</p>
+              <p className="text-gray-600 mt-0.5">GET: 75/د · POST: 80/د · تتبع: 15/10د</p>
+            </div>
+            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+              <p className="font-extrabold text-[#252a31]">محظورات نشطة الآن</p>
+              <p className="text-lg font-black text-red-600 mt-0.5">{shieldReport.activeBlocks?.length || 0}</p>
+            </div>
+          </div>
+
+          {shieldReport.recentHighTraffic?.length > 0 && (
+            <div className="overflow-x-auto border rounded-xl">
+              <table className="w-full text-xs text-right">
+                <thead className="bg-gray-50 font-bold text-gray-500">
+                  <tr><th className="p-2.5">النطاق / المفتاح</th><th className="p-2.5">IP</th><th className="p-2.5">الطلبات</th><th className="p-2.5">الحالة</th></tr>
+                </thead>
+                <tbody className="divide-y">
+                  {shieldReport.recentHighTraffic.slice(0, 15).map((r: any) => (
+                    <tr key={r.bucket_key}>
+                      <td className="p-2.5 font-mono text-[11px]" dir="ltr">{r.bucket_key}</td>
+                      <td className="p-2.5 font-mono text-[11px]" dir="ltr">{r.last_ip || '-'}</td>
+                      <td className="p-2.5 font-bold">{r.hits}</td>
+                      <td className="p-2.5">
+                        <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${r.is_blocked ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>
+                          {r.is_blocked ? 'محظور مؤقتاً (429)' : 'مراقَب'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
         <div className="bg-white border rounded-2xl p-5 space-y-3 text-xs">
           <p className="font-bold text-sm flex items-center gap-2"><KeyRound className="w-4 h-4 text-[#fe9931]" /> تفعيل TOTP 2FA لحسابك</p>
           {!totpSecret ? (

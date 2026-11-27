@@ -1,6 +1,7 @@
-import React, { useState, useMemo } from 'react';
-import { Megaphone, Copy, Check, Link2, ExternalLink } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Megaphone, Copy, Check, Link2, ExternalLink, RefreshCw, ShieldCheck } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
+import { neonDb } from '../../services/neonDb';
 import { buildProductAdUrl, buildStoreAdUrl, type AdPlatformSource } from '../../utils/adLinks';
 import { normalizeMetaPixelId } from '../../utils/metaPixel';
 import type { StoreSettings } from '../../types';
@@ -15,12 +16,30 @@ export const MarketingAdToolsCard: React.FC<Props> = ({ formSettings, setFormSet
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://qamar-fragrances.com';
 
   const [copiedKey, setCopiedKey] = useState<string>('');
+  const [feedToken, setFeedToken] = useState<string>('');
+  const [rotatingToken, setRotatingToken] = useState(false);
   const [adSource, setAdSource] = useState<AdPlatformSource>('facebook');
   const [adCampaign, setAdCampaign] = useState('');
   const [targetType, setTargetType] = useState<'home' | 'shop' | 'collection' | 'product'>('product');
   const [selectedCollection, setSelectedCollection] = useState(collections[0]?.handle || '');
   const [productSearch, setProductSearch] = useState('');
   const [selectedProductHandle, setSelectedProductHandle] = useState(products[0]?.handle || '');
+
+  useEffect(() => {
+    neonDb.getMetaFeedConfig().then(cfg => {
+      if (cfg?.token) setFeedToken(cfg.token);
+    }).catch(() => {});
+  }, []);
+
+  const handleRotateFeedToken = async () => {
+    setRotatingToken(true);
+    try {
+      const res = await neonDb.rotateMetaFeedToken();
+      if (res?.token) setFeedToken(res.token);
+    } finally {
+      setRotatingToken(false);
+    }
+  };
 
   const copyText = async (key: string, text: string) => {
     try {
@@ -52,8 +71,9 @@ export const MarketingAdToolsCard: React.FC<Props> = ({ formSettings, setFormSet
     return buildStoreAdUrl({ origin, path: '/ar', source: adSource, medium: 'cpc', campaign: adCampaign });
   }, [origin, targetType, activeHandle, selectedCollection, adSource, adCampaign]);
 
-  const csvFeedUrl = `${origin}/meta-feed.csv`;
-  const xmlFeedUrl = `${origin}/meta-feed.xml`;
+  const tokenQuery = feedToken ? `?token=${encodeURIComponent(feedToken)}` : '';
+  const csvFeedUrl = `${origin}/meta-feed.csv${tokenQuery}`;
+  const xmlFeedUrl = `${origin}/meta-feed.xml${tokenQuery}`;
   const pixelRaw = String(formSettings.meta_pixel_id || '');
   const pixelValid = !pixelRaw.trim() || Boolean(normalizeMetaPixelId(pixelRaw));
 
@@ -100,7 +120,24 @@ export const MarketingAdToolsCard: React.FC<Props> = ({ formSettings, setFormSet
         </div>
 
         <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4 space-y-2.5">
-          <p className="font-extrabold text-[#252a31]">روابط كتالوج المنتجات التلقائي لإعلانات Meta وGoogle Shopping (تتحدث لحظياً بكل العطور):</p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="font-extrabold text-[#252a31] flex items-center gap-1.5">
+              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>روابط كتالوج المنتجات المحمية بتوكن سري لإعلانات Meta وGoogle Shopping:</span>
+            </p>
+            <button
+              type="button"
+              disabled={rotatingToken}
+              onClick={() => void handleRotateFeedToken()}
+              className="px-3 py-1 rounded-full bg-white hover:bg-gray-100 border border-amber-300 text-[#252a31] font-bold text-[11px] flex items-center gap-1 disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3 h-3 ${rotatingToken ? 'animate-spin' : ''}`} />
+              <span>توليد مفتاح حماية جديد</span>
+            </button>
+          </div>
+          <p className="text-[11px] text-amber-900">
+            الروابط محمية الآن بمفتاح سري (`token`) لمنع سحب الكتالوج عبر الويب سكرابينج؛ انسخ الرابط كاملاً وضعه داخل Meta Commerce Manager فقط.
+          </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="bg-white border rounded-xl p-2.5 flex items-center justify-between gap-2">
               <div className="min-w-0">

@@ -83,6 +83,8 @@ export default defineConfig({
   plugins: [react(), devApiPlugin()],
   server: { port: 5175, open: false, host: true },
   build: {
+    sourcemap: false,
+    target: 'es2020',
     rollupOptions: {
       output: {
         manualChunks: {
