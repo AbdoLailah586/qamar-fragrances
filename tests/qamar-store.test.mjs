@@ -1392,4 +1392,18 @@ describe('Online Payment Gateway Infrastructure (Kashier / Paymob) & Liquid Glas
 
     assert.deepEqual(dispatched, ['order_confirmed', 'shipped']);
   });
+
+  test('AuthModal and Checkout require explicit acceptance of Store Policies, Terms, Privacy, and Cookies', () => {
+    const authSrc = readFileSync(resolve(ROOT, 'src/components/AuthModal.tsx'), 'utf8');
+    assert.match(authSrc, /auth-policy-checkbox/);
+    assert.match(authSrc, /Cookies/);
+    assert.match(authSrc, /!acceptedPolicies/);
+
+    const checkoutSrc = readFileSync(resolve(ROOT, 'src/pages/Checkout.tsx'), 'utf8');
+    assert.match(checkoutSrc, /checkout-policy-checkbox/);
+    assert.match(checkoutSrc, /Cookies/);
+    assert.match(checkoutSrc, /if \(!acceptedPolicies\)/);
+    assert.match(checkoutSrc, /navigate\('terms'\)/);
+    assert.match(checkoutSrc, /navigate\('privacy'\)/);
+  });
 });

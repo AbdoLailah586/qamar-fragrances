@@ -34,6 +34,8 @@ export const Checkout: React.FC = () => {
   const [paymentReference, setPaymentReference] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [acceptedPolicies, setAcceptedPolicies] = useState(false);
+  const [policyError, setPolicyError] = useState(false);
 
   // Early capture of guest name/phone into active_carts & visitor_sessions for CRM abandoned-cart follow-up
   useEffect(() => {
@@ -154,6 +156,11 @@ export const Checkout: React.FC = () => {
     }
     if (googleMapsUrl.trim() && !isGoogleMapsUrl(googleMapsUrl)) {
       setError('أدخل رابط خرائط جوجل (Google Maps) صحيح يبدأ بـ https:// أو حدد الموقع من الخريطة.');
+      return;
+    }
+    if (!acceptedPolicies) {
+      setPolicyError(true);
+      setError('يجب الموافقة على شروط الاستخدام وسياسة الخصوصية والاستبدال والشحن وملفات تعريف الارتباط (Cookies) قبل تأكيد الطلب.');
       return;
     }
     setSubmitting(true);
@@ -555,6 +562,52 @@ export const Checkout: React.FC = () => {
               <span>الإجمالي</span>
               <span className="text-[#fe9931]">{formatEGP(total)}</span>
             </div>
+          </div>
+
+          <div
+            data-testid="checkout-policy-consent"
+            className={`p-3.5 rounded-2xl border text-xs leading-relaxed transition-colors ${
+              policyError && !acceptedPolicies
+                ? 'bg-red-50 border-red-400 ring-2 ring-red-200 text-[#252a31]'
+                : acceptedPolicies
+                  ? 'bg-emerald-50/70 border-emerald-300 text-[#252a31]'
+                  : 'bg-orange-50/70 border-orange-200 text-[#252a31]'
+            }`}
+          >
+            <label className="flex items-start gap-2.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                data-testid="checkout-policy-checkbox"
+                checked={acceptedPolicies}
+                onChange={e => {
+                  setAcceptedPolicies(e.target.checked);
+                  if (e.target.checked) {
+                    setPolicyError(false);
+                    if (error.includes('الموافقة')) setError('');
+                  }
+                }}
+                className="mt-0.5 w-4 h-4 accent-[#fe9931] shrink-0"
+              />
+              <span>
+                أوافق على جميع{' '}
+                <button type="button" onClick={() => navigate('terms')} className="text-[#fe9931] font-bold underline">
+                  شروط الاستخدام
+                </button>
+                ، و{' '}
+                <button type="button" onClick={() => navigate('privacy')} className="text-[#fe9931] font-bold underline">
+                  سياسة الخصوصية
+                </button>
+                ، و{' '}
+                <button type="button" onClick={() => navigate('refund')} className="text-[#fe9931] font-bold underline">
+                  الاستبدال والاسترجاع
+                </button>
+                ، و{' '}
+                <button type="button" onClick={() => navigate('shipping')} className="text-[#fe9931] font-bold underline">
+                  الشحن والتوصيل
+                </button>
+                ، وجمع واستخدام ملفات تعريف الارتباط (<strong className="font-bold">Cookies</strong>) لإتمام الطلب.
+              </span>
+            </label>
           </div>
 
           <button

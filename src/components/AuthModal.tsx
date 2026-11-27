@@ -37,6 +37,9 @@ export const AuthModal: React.FC = () => {
   const [successMsg, setSuccessMsg] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [acceptedPolicies, setAcceptedPolicies] = useState(false);
+  const acceptedPoliciesRef = useRef(false);
+  acceptedPoliciesRef.current = acceptedPolicies;
 
   const [googleStatus, setGoogleStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [googleError, setGoogleError] = useState('');
@@ -45,6 +48,10 @@ export const AuthModal: React.FC = () => {
 
   const handleGoogleCredentialResponse = useCallback(async (response: any) => {
     if (!response?.credential) return;
+    if (!acceptedPoliciesRef.current) {
+      setError('يرجى وضع علامة الموافقة على الشروط والسياسات وملفات الكوكيز قبل تسجيل الدخول بحساب Google.');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
@@ -112,6 +119,10 @@ export const AuthModal: React.FC = () => {
     e.preventDefault();
     setError('');
     setSuccessMsg('');
+    if (!pendingSecondFactor && !acceptedPolicies) {
+      setError('يجب الموافقة على شروط الاستخدام وسياسة الخصوصية وملفات تعريف الارتباط (Cookies) للمتابعة.');
+      return;
+    }
     setLoading(true);
     try {
       if (pendingSecondFactor) {
@@ -313,10 +324,20 @@ export const AuthModal: React.FC = () => {
             {!pendingSecondFactor && (
               <>
                 <div className="space-y-2">
-                  <div
-                    ref={googleBtnContainerRef}
-                    className={`flex justify-center w-full min-h-[44px] ${loading ? 'pointer-events-none opacity-60' : ''}`}
-                  />
+                  <div className="relative flex justify-center w-full min-h-[44px]">
+                    <div
+                      ref={googleBtnContainerRef}
+                      className={`flex justify-center w-full min-h-[44px] ${loading || !acceptedPolicies ? 'opacity-65' : ''}`}
+                    />
+                    {!acceptedPolicies && (
+                      <button
+                        type="button"
+                        aria-label="يجب الموافقة على الشروط والكوكيز قبل تسجيل الدخول بحساب Google"
+                        onClick={() => setError('يرجى وضع علامة الموافقة على الشروط والسياسات وملفات الكوكيز أولاً قبل تسجيل الدخول عبر Google.')}
+                        className="absolute inset-0 z-10 cursor-pointer rounded-full bg-white/35"
+                      />
+                    )}
+                  </div>
                   {googleStatus === 'loading' && (
                     <p role="status" className="text-center text-xs text-gray-500">
                       جاري تجهيز تسجيل الدخول باستخدام Google...
@@ -430,6 +451,57 @@ export const AuthModal: React.FC = () => {
                   </div>
                 </div>
               </>
+            )}
+
+            {!pendingSecondFactor && (
+              <div
+                data-testid="auth-policy-consent"
+                className={`p-3 rounded-xl border text-[11px] leading-relaxed transition-colors ${
+                  acceptedPolicies
+                    ? 'bg-emerald-50/70 border-emerald-300 text-[#252a31]'
+                    : 'bg-orange-50/70 border-orange-200 text-[#252a31]'
+                }`}
+              >
+                <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    data-testid="auth-policy-checkbox"
+                    checked={acceptedPolicies}
+                    onChange={e => {
+                      setAcceptedPolicies(e.target.checked);
+                      if (e.target.checked && error.includes('الموافقة')) setError('');
+                    }}
+                    className="mt-0.5 w-4 h-4 accent-[#fe9931] shrink-0"
+                  />
+                  <span>
+                    أوافق على{' '}
+                    <button
+                      type="button"
+                      onClick={() => { closeAuthModal(); navigate('terms'); }}
+                      className="text-[#fe9931] font-bold underline"
+                    >
+                      شروط الاستخدام
+                    </button>
+                    ، و{' '}
+                    <button
+                      type="button"
+                      onClick={() => { closeAuthModal(); navigate('privacy'); }}
+                      className="text-[#fe9931] font-bold underline"
+                    >
+                      سياسة الخصوصية
+                    </button>
+                    ، و{' '}
+                    <button
+                      type="button"
+                      onClick={() => { closeAuthModal(); navigate('refund'); }}
+                      className="text-[#fe9931] font-bold underline"
+                    >
+                      الاستبدال والشحن
+                    </button>
+                    ، وجمع واستخدام ملفات تعريف الارتباط (<strong className="font-bold">Cookies</strong>) لحفظ الجلسة.
+                  </span>
+                </label>
+              </div>
             )}
 
             <button
