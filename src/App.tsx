@@ -17,6 +17,7 @@ import { OrderSuccess } from './pages/OrderSuccess';
 import { OrderTracking } from './pages/OrderTracking';
 import { Profile } from './pages/Profile';
 import { PolicyPage } from './pages/PolicyPage';
+import { CookieBanner } from './components/CookieBanner';
 
 // Lazy-load the Admin ERP so customer storefront bundles remain lightweight and fast
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
@@ -61,6 +62,7 @@ const StorefrontRouter: React.FC = () => {
       </div>
       <Footer />
       <MobileBottomNav />
+      <CookieBanner />
       <CartDrawer />
       <AuthModal />
     </div>

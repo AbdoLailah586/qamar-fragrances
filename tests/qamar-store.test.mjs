@@ -1406,4 +1406,36 @@ describe('Online Payment Gateway Infrastructure (Kashier / Paymob) & Liquid Glas
     assert.match(checkoutSrc, /navigate\('terms'\)/);
     assert.match(checkoutSrc, /navigate\('privacy'\)/);
   });
+
+  test('CookieBanner shows only on first visit per device and persists consent across subsequent visits', async () => {
+    const ts = (await import('typescript')).default;
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    const React = req('react');
+    const iconsMod = new Proxy({}, { get: (_, name) => name === '__esModule' ? true : () => React.createElement('svg') });
+    const storeMap = new Map();
+    const mocks = {
+      react: React,
+      'lucide-react': iconsMod,
+      '../context/StoreContext': { useStore: () => ({ navigate: () => {} }) },
+      '../utils/browserStorage': {
+        readStorage: (k) => storeMap.get(k) ?? null,
+        writeStorage: (k, v) => { storeMap.set(k, v); return true; }
+      }
+    };
+    const src = readFileSync(resolve(ROOT, 'src/components/CookieBanner.tsx'), 'utf8');
+    const code = ts.transpileModule(src, {
+      compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true }
+    }).outputText;
+    const mod = { exports: {} };
+    new Function('require', 'module', 'exports', code)(id => mocks[id] || req(id), mod, mod.exports);
+    const cookieMod = mod.exports;
+
+    assert.equal(cookieMod.hasCookieConsent(), false);
+    assert.equal(cookieMod.saveCookieConsent('essential'), true);
+    assert.equal(cookieMod.hasCookieConsent(), true);
+
+    const appSrc = readFileSync(resolve(ROOT, 'src/App.tsx'), 'utf8');
+    assert.match(appSrc, /CookieBanner/);
+  });
 });
