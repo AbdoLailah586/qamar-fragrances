@@ -9,6 +9,10 @@ import {
   testWhatsAppCrmConnection,
   DEFAULT_WHATSAPP_TEMPLATES
 } from './whatsappCrm.js';
+import {
+  toAdminPaymentGatewayState,
+  resolvePaymentGatewayConfig
+} from './paymentGateway.js';
 import type { Product, Order, OrderStatus, PaymentMethod, PaymentStatus, StoreCollection, WhatsAppNotificationType } from '../src/types.js';
 
 const queryClient = () => neon(process.env.DATABASE_URL || '');
@@ -1453,5 +1457,88 @@ export const neonDb = {
       type: 'custom',
       settings
     });
+  },
+
+  // Unified Online Payment Gateway (Kashier / Paymob) Admin Config
+  async getPaymentGatewayAdminConfig() {
+    const settings = (await this.getStoreSettings()) || {};
+    return toAdminPaymentGatewayState(settings);
+  },
+
+  async savePaymentGatewayConfig(config: any) {
+    if (!config || typeof config !== 'object') {
+      return { success: false, error: 'بيانات البوابة غير صالحة.' };
+    }
+    const current = (await this.getStoreSettings()) || {};
+    const provider = ['none', 'kashier', 'paymob'].includes(String(config.payment_gateway_provider || '').toLowerCase())
+      ? String(config.payment_gateway_provider).toLowerCase()
+      : 'none';
+    const mode = String(config.payment_gateway_mode || '').toLowerCase() === 'live' ? 'live' : 'test';
+
+    const merged: any = {
+      ...current,
+      payment_gateway_provider: provider,
+      payment_gateway_mode: mode,
+      payment_gateway_merchant_id:
+        typeof config.payment_gateway_merchant_id === 'string'
+          ? config.payment_gateway_merchant_id.trim()
+          : current.payment_gateway_merchant_id || '',
+      payment_gateway_public_key:
+        typeof config.payment_gateway_public_key === 'string'
+          ? config.payment_gateway_public_key.trim()
+          : current.payment_gateway_public_key || '',
+      payment_gateway_card_integration_id:
+        typeof config.payment_gateway_card_integration_id === 'string'
+          ? config.payment_gateway_card_integration_id.trim()
+          : current.payment_gateway_card_integration_id || '',
+      payment_gateway_wallet_integration_id:
+        typeof config.payment_gateway_wallet_integration_id === 'string'
+          ? config.payment_gateway_wallet_integration_id.trim()
+          : current.payment_gateway_wallet_integration_id || '',
+      payment_gateway_instapay_integration_id:
+        typeof config.payment_gateway_instapay_integration_id === 'string'
+          ? config.payment_gateway_instapay_integration_id.trim()
+          : current.payment_gateway_instapay_integration_id || '',
+      payment_gateway_enable_card: config.payment_gateway_enable_card !== false,
+      payment_gateway_enable_wallet: Boolean(config.payment_gateway_enable_wallet),
+      payment_gateway_enable_instapay: Boolean(config.payment_gateway_enable_instapay)
+    };
+
+    if (typeof config.payment_gateway_api_key === 'string' && config.payment_gateway_api_key.trim()) {
+      merged.payment_gateway_api_key = config.payment_gateway_api_key.trim();
+    }
+    if (typeof config.payment_gateway_secret_key === 'string' && config.payment_gateway_secret_key.trim()) {
+      merged.payment_gateway_secret_key = config.payment_gateway_secret_key.trim();
+    }
+    if (typeof config.payment_gateway_hmac_secret === 'string' && config.payment_gateway_hmac_secret.trim()) {
+      merged.payment_gateway_hmac_secret = config.payment_gateway_hmac_secret.trim();
+    }
+
+    const saved = await this.updateStoreSettings(merged);
+    return {
+      ...(saved && typeof saved === 'object' ? saved : { success: true }),
+      gateway: toAdminPaymentGatewayState(merged)
+    };
+  },
+
+  async testPaymentGatewayConfig() {
+    const settings = (await this.getStoreSettings()) || {};
+    const cfg = resolvePaymentGatewayConfig(settings);
+    if (cfg.provider === 'none') {
+      return { success: false, error: 'اختر كاشير (Kashier) أو باي موب (Paymob) أولاً ثم احفظ البيانات.' };
+    }
+    if (!cfg.configured) {
+      return {
+        success: false,
+        error:
+          cfg.provider === 'kashier'
+            ? 'أدخل Merchant ID و Payment API Key الخاصين بحساب Kashier ثم احفظ أولاً.'
+            : 'أدخل Public Key و Secret Key ومعرّف التكامل (Integration ID) لحساب Paymob ثم احفظ أولاً.'
+      };
+    }
+    return {
+      success: true,
+      message: `بوابة ${cfg.provider === 'kashier' ? 'Kashier' : 'Paymob'} (${cfg.mode === 'live' ? 'تشغيل فعلي' : 'وضع اختبار'}) مهيأة وجاهزة لاستقبال المدفوعات!`
+    };
   }
 };

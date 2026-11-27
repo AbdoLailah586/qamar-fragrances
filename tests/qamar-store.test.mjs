@@ -49,6 +49,8 @@ const adLinks = await import(pathToFileURL(resolve(ROOT, 'src/utils/adLinks.ts')
 const metaPixel = await import(pathToFileURL(resolve(ROOT, 'src/utils/metaPixel.ts')).href);
 const storeApi = await import(pathToFileURL(resolve(ROOT, 'api/store.ts')).href);
 const whatsappCrm = await import(pathToFileURL(resolve(ROOT, 'server/whatsappCrm.ts')).href);
+const paymentGateway = await import(pathToFileURL(resolve(ROOT, 'server/paymentGateway.ts')).href);
+const paymentCallbackApi = await import(pathToFileURL(resolve(ROOT, 'api/payment-callback.ts')).href);
 
 function createMockRes() {
   const headers = {};
@@ -1128,5 +1130,189 @@ describe('Meta Ads Tools: Social Crawler OG, Catalog Feed CSV/XML, Pixel & Encod
     const marketingSrc = readFileSync(resolve(ROOT, 'src/pages/admin/MarketingAdToolsCard.tsx'), 'utf8');
     assert.match(marketingSrc, /meta-feed\.csv/);
     assert.match(marketingSrc, /meta_pixel_id/);
+  });
+});
+
+describe('Online Payment Gateway Infrastructure (Kashier / Paymob) & Liquid Glass Dock', () => {
+  test('GET getStoreSettings strips payment secrets while exposing safe payment_gateway_public capabilities', async () => {
+    const mockStore = {
+      async getStoreSettings() {
+        return {
+          whatsapp_number: '201003732029',
+          payment_gateway_provider: 'kashier',
+          payment_gateway_mode: 'test',
+          payment_gateway_merchant_id: 'MID-12345',
+          payment_gateway_api_key: 'super-secret-api-key',
+          payment_gateway_secret_key: 'super-secret-key',
+          payment_gateway_hmac_secret: 'super-hmac',
+          payment_gateway_enable_card: true,
+          payment_gateway_enable_wallet: true,
+          payment_gateway_enable_instapay: false
+        };
+      }
+    };
+    const req = createMockReq({ method: 'GET', query: { method: 'getStoreSettings' } });
+    const res = createMockRes();
+    await storeApi.default(req, res, { sql: async () => [], store: mockStore });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.result.payment_gateway_api_key, undefined);
+    assert.equal(res.body.result.payment_gateway_secret_key, undefined);
+    assert.equal(res.body.result.payment_gateway_hmac_secret, undefined);
+    assert.equal(res.body.result.payment_gateway_public.configured, true);
+    assert.equal(res.body.result.payment_gateway_public.provider, 'kashier');
+    assert.deepEqual(res.body.result.payment_gateway_public.methods, { card: true, wallet: true, instapay: false });
+  });
+
+  test('Payment gateway admin RPCs enforce RBAC and unconfigured card checkout is rejected cleanly', async () => {
+    for (const method of ['getPaymentGatewayAdminConfig', 'savePaymentGatewayConfig', 'testPaymentGatewayConfig']) {
+      const res = createMockRes();
+      await storeApi.default(
+        createMockReq({ method: 'POST', headers: { origin: 'https://qamar-fragrances.com' }, body: { method, args: [{}] } }),
+        res,
+        { sql: async () => [], store: {}, user: null }
+      );
+      assert.equal(res.statusCode, 403);
+    }
+
+    const resUnconf = createMockRes();
+    await storeApi.default(
+      createMockReq({
+        method: 'POST',
+        headers: { origin: 'https://qamar-fragrances.com' },
+        body: {
+          method: 'createOrder',
+          args: [{
+            customer_name: 'أحمد قمر',
+            customer_phone: '01012345678',
+            governorate: 'القاهرة',
+            address_details: 'شارع عباس العقاد',
+            subtotal: 300,
+            shipping_fee: 50,
+            total: 350,
+            payment_method: 'card',
+            items: [{ product: { id: 'p-1', name_ar: 'عطر قمر', price: 300 }, selectedSize: '50ml', quantity: 1, unitPrice: 300 }]
+          }]
+        }
+      }),
+      resUnconf,
+      { sql: Object.assign(async () => [], { query: async () => [] }), store: { async getStoreSettings() { return {}; } }, user: null }
+    );
+    assert.equal(resUnconf.statusCode, 400);
+  });
+
+  test('Kashier createOrder returns signed checkoutUrl and /api/payment-callback verifies HMAC before marking paid', async () => {
+    const updates = [];
+    const fakeSql = Object.assign(
+      async (strings, ...vals) => {
+        const q = strings.join('?');
+        if (q.includes('UPDATE orders')) {
+          updates.push({ q, vals });
+          return [{
+            id: 'ord-k1',
+            order_number: 'QMR-2026-KASH1',
+            customer_name: 'عميل كاشير',
+            customer_phone: '01012345678',
+            governorate: 'القاهرة',
+            address: 'المعادي',
+            items: [{ product: { name_ar: 'عطر قمر', price: 300 }, quantity: 1, unitPrice: 300 }],
+            subtotal: 300,
+            shipping_fee: 50,
+            total: 350,
+            payment_method: 'card',
+            payment_status: 'paid'
+          }];
+        }
+        return [];
+      },
+      { query: async (_q, params) => [{ id: JSON.parse(params[0]).id }] }
+    );
+    const kashierSettings = {
+      payment_gateway_provider: 'kashier',
+      payment_gateway_mode: 'test',
+      payment_gateway_merchant_id: 'MID-TEST-99',
+      payment_gateway_api_key: 'test-kashier-api-key',
+      payment_gateway_enable_card: true,
+      payment_gateway_enable_wallet: true,
+      payment_gateway_enable_instapay: true
+    };
+
+    const resCreate = createMockRes();
+    await storeApi.default(
+      createMockReq({
+        method: 'POST',
+        headers: { origin: 'https://qamar-fragrances.com', host: 'qamar-fragrances.com', 'x-forwarded-proto': 'https' },
+        body: {
+          method: 'createOrder',
+          args: [{
+            id: 'ord-k1',
+            order_number: 'QMR-2026-KASH1',
+            customer_name: 'عميل كاشير',
+            customer_phone: '01012345678',
+            governorate: 'القاهرة',
+            address_details: 'المعادي',
+            subtotal: 300,
+            shipping_fee: 50,
+            total: 350,
+            payment_method: 'card',
+            items: [{ product: { id: 'p-1', name_ar: 'عطر قمر', price: 300 }, selectedSize: '50ml', quantity: 1, unitPrice: 300 }]
+          }]
+        }
+      }),
+      resCreate,
+      { sql: fakeSql, store: { async getStoreSettings() { return kashierSettings; } }, user: null }
+    );
+    assert.equal(resCreate.statusCode, 200);
+    assert.equal(resCreate.body.result.payment.provider, 'kashier');
+    assert.match(resCreate.body.result.payment.checkoutUrl, /^https:\/\/checkout\.kashier\.io\/\?/);
+    assert.match(resCreate.body.result.payment.checkoutUrl, /merchantId=MID-TEST-99/);
+    assert.match(resCreate.body.result.payment.checkoutUrl, /currency=EGP/);
+
+    const badWebhookRes = createMockRes();
+    await paymentCallbackApi.default(
+      {
+        method: 'POST',
+        url: '/api/payment-callback?provider=kashier',
+        headers: { 'x-kashier-signature': '00'.repeat(32) },
+        body: { data: { merchantOrderId: 'QMR-2026-KASH1', status: 'SUCCESS', signatureKeys: ['status', 'merchantOrderId'] } }
+      },
+      badWebhookRes,
+      { sql: fakeSql, store: { async getStoreSettings() { return kashierSettings; } } }
+    );
+    assert.equal(badWebhookRes.statusCode, 400);
+    assert.equal(updates.length, 0);
+
+    const { createHmac } = await import('node:crypto');
+    const payloadData = { merchantOrderId: 'QMR-2026-KASH1', status: 'SUCCESS', transactionId: 'TXN-88', signatureKeys: ['merchantOrderId', 'status'] };
+    const sig = createHmac('sha256', kashierSettings.payment_gateway_api_key).update('merchantOrderId=QMR-2026-KASH1&status=SUCCESS').digest('hex');
+
+    const goodWebhookRes = createMockRes();
+    await paymentCallbackApi.default(
+      {
+        method: 'POST',
+        url: '/api/payment-callback?provider=kashier',
+        headers: { 'x-kashier-signature': sig },
+        body: { data: payloadData }
+      },
+      goodWebhookRes,
+      { sql: fakeSql, store: { async getStoreSettings() { return kashierSettings; } } }
+    );
+    assert.equal(goodWebhookRes.statusCode, 200);
+    assert.equal(goodWebhookRes.body.verified, true);
+    assert.equal(goodWebhookRes.body.paid, true);
+    assert.equal(updates.length, 1);
+  });
+
+  test('MobileBottomNav renders floating iPhone Liquid Glass pill detached from bottom edge', () => {
+    const bottomSrc = readFileSync(resolve(ROOT, 'src/components/MobileBottomNav.tsx'), 'utf8');
+    const cssSrc = readFileSync(resolve(ROOT, 'src/index.css'), 'utf8');
+    const cardSrc = readFileSync(resolve(ROOT, 'src/pages/admin/PaymentGatewaySettingsCard.tsx'), 'utf8');
+    assert.match(bottomSrc, /bottom-\[max\(14px,env\(safe-area-inset-bottom\)\)\]/);
+    assert.match(bottomSrc, /qamar-liquid-glass-dock/);
+    assert.match(bottomSrc, /rounded-full/);
+    assert.match(cssSrc, /backdrop-filter:\s*blur\(26px\)/);
+    assert.match(cardSrc, /Kashier/);
+    assert.match(cardSrc, /Paymob/);
+    assert.ok(typeof paymentGateway.verifyPaymobHmac === 'function');
   });
 });

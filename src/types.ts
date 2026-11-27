@@ -82,8 +82,21 @@ export type OrderStatus =
   | 'delivered'
   | 'cancelled';
 
-export type PaymentMethod = 'cod' | 'instapay' | 'vodafone_cash' | 'card';
+export type PaymentMethod = 'cod' | 'instapay' | 'vodafone_cash' | 'card' | 'credit_card';
 export type PaymentStatus = 'unpaid' | 'paid' | 'verified';
+export type PaymentGatewayProvider = 'none' | 'kashier' | 'paymob';
+export type PaymentGatewayMode = 'test' | 'live';
+
+export interface PaymentGatewayPublicState {
+  provider: PaymentGatewayProvider;
+  mode: PaymentGatewayMode;
+  configured: boolean;
+  methods: {
+    card: boolean;
+    wallet: boolean;
+    instapay: boolean;
+  };
+}
 
 export interface DeliveryAddressFields {
   governorate: string;
@@ -118,6 +131,7 @@ export interface Order {
   payment_method: PaymentMethod;
   payment_status: PaymentStatus;
   payment_reference?: string;
+  checkout_url?: string;
   order_status: OrderStatus;
   tracking_number: string;
   courier_name?: string;
@@ -196,6 +210,9 @@ export interface StoreSettings {
   admin_alert_whatsapp_number?: string;
   meta_pixel_id?: string;
   meta_pixel_enabled?: boolean;
+  payment_gateway_provider?: PaymentGatewayProvider;
+  payment_gateway_mode?: PaymentGatewayMode;
+  payment_gateway_public?: PaymentGatewayPublicState;
   whatsapp_templates?: WhatsAppTemplates;
   whatsapp_automation_url?: string;
   whatsapp_automation_email?: string;

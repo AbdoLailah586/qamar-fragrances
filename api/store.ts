@@ -6,6 +6,14 @@ import { canAccessSection, isFullAdmin, normalizePermissions, publicUser, OWNER_
 import { normalizePhone } from '../src/utils/deliveryAddress.js';
 import { saveOrder, cancelOrder as cancelStoredOrder } from '../server/orderWrites.js';
 import { buildServerOrderWhatsAppMessage, dispatchWhatsAppViaCrm, resolveCrmConfig } from '../server/whatsappCrm.js';
+import {
+  stripPaymentSecrets,
+  toPublicPaymentGatewayState,
+  shouldRouteOrderToGateway,
+  createGatewayCheckoutSession,
+  resolveRequestOrigin,
+  normalizeGatewayMethod
+} from '../server/paymentGateway.js';
 
 const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
 const forbidden = () => fail(403, 'هذا الإجراء غير متاح ضمن صلاحيات حسابك.');
@@ -54,15 +62,19 @@ const policies: Record<string, string[]> = {
   testWhatsAppConnection: ['whatsapp', 'settings'],
   getWhatsAppNotifications: ['whatsapp', 'orders'],
   sendOrderWhatsApp: ['whatsapp', 'orders', 'fulfillment'],
-  sendTestWhatsApp: ['whatsapp', 'settings']
+  sendTestWhatsApp: ['whatsapp', 'settings'],
+  getPaymentGatewayAdminConfig: ['settings'],
+  savePaymentGatewayConfig: ['settings'],
+  testPaymentGatewayConfig: ['settings']
 };
 
 function safeSettings(settings: any) {
   if (!settings || typeof settings !== 'object') return settings;
-  const copy = { ...settings };
+  const copy = stripPaymentSecrets(settings);
   delete copy.whatsapp_automation_url;
   delete copy.whatsapp_automation_email;
   delete copy.whatsapp_automation_pass;
+  copy.payment_gateway_public = toPublicPaymentGatewayState(settings);
   return copy;
 }
 
@@ -233,12 +245,26 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
   if (method === 'updateStoreSettings') {
     const current = (await store.getStoreSettings().catch(() => null)) || {};
     const incoming = args[0] && typeof args[0] === 'object' ? { ...args[0] } : {};
-    // Keep server-side CRM secrets intact unless explicitly updated from the dedicated WhatsApp panel
+    delete incoming.payment_gateway_public;
+    // Keep server-side CRM and payment gateway secrets intact unless updated via their dedicated admin actions
     const merged = {
       ...incoming,
       whatsapp_automation_url: current.whatsapp_automation_url,
       whatsapp_automation_email: current.whatsapp_automation_email,
-      whatsapp_automation_pass: current.whatsapp_automation_pass
+      whatsapp_automation_pass: current.whatsapp_automation_pass,
+      payment_gateway_provider: current.payment_gateway_provider,
+      payment_gateway_mode: current.payment_gateway_mode,
+      payment_gateway_merchant_id: current.payment_gateway_merchant_id,
+      payment_gateway_api_key: current.payment_gateway_api_key,
+      payment_gateway_secret_key: current.payment_gateway_secret_key,
+      payment_gateway_public_key: current.payment_gateway_public_key,
+      payment_gateway_hmac_secret: current.payment_gateway_hmac_secret,
+      payment_gateway_card_integration_id: current.payment_gateway_card_integration_id,
+      payment_gateway_wallet_integration_id: current.payment_gateway_wallet_integration_id,
+      payment_gateway_instapay_integration_id: current.payment_gateway_instapay_integration_id,
+      payment_gateway_enable_card: current.payment_gateway_enable_card,
+      payment_gateway_enable_wallet: current.payment_gateway_enable_wallet,
+      payment_gateway_enable_instapay: current.payment_gateway_enable_instapay
     };
     return store.updateStoreSettings(merged);
   }
@@ -478,8 +504,13 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
     const subtotal = order.items.reduce((sum: number, i: any) => sum + Number(i.unitPrice ?? i.product.price) * i.quantity, 0);
     if (Math.abs(subtotal - order.subtotal) > 0.011) throw fail(400, 'راجع إجمالي المنتجات في السلة.');
     const phone = normalizePhone(String(order.customer_phone || ''));
-    if (phone.length !== 11 || !order.customer_name?.trim() || !order.address_details?.trim() || !['cod', 'instapay', 'vodafone_cash', 'card'].includes(order.payment_method)) {
+    if (phone.length !== 11 || !order.customer_name?.trim() || !order.address_details?.trim() || !['cod', 'instapay', 'vodafone_cash', 'card', 'credit_card'].includes(order.payment_method)) {
       throw fail(400, 'راجع اسم العميل والهاتف والعنوان وطريقة الدفع.');
+    }
+    const orderSettings = (typeof store?.getStoreSettings === 'function' ? await store.getStoreSettings().catch(() => ({})) : {}) || {};
+    const useGateway = shouldRouteOrderToGateway(order.payment_method, orderSettings);
+    if (normalizeGatewayMethod(order.payment_method) === 'card' && !useGateway && !deps?.allowUnconfiguredCard) {
+      throw fail(400, 'الدفع بالبطاقة الإلكترونية غير مفعّل بعد من إعدادات بوابة الدفع.');
     }
     const safeOrderNumber = /^QMR-[A-Z0-9-]{4,80}$/.test(String(order.order_number || '').trim())
       ? String(order.order_number).trim()
@@ -510,21 +541,19 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
         })
         .catch(() => {});
     }
+    const fullOrder = {
+      ...order,
+      id: safeOrderId,
+      order_number: safeOrderNumber,
+      customer_phone: phone,
+      customer_email: user?.email || order.customer_email || undefined,
+      payment_status: 'unpaid',
+      order_status: 'pending'
+    };
     if (saved && (!deps || deps.dispatchWhatsApp)) {
       try {
-        const settings = await store.getStoreSettings().catch(() => ({}));
-        const crm = resolveCrmConfig(settings);
+        const crm = resolveCrmConfig(orderSettings);
         const dispatch = deps?.dispatchWhatsApp || dispatchWhatsAppViaCrm;
-        const fullOrder = {
-          ...order,
-          id: safeOrderId,
-          order_number: safeOrderNumber,
-          customer_phone: phone,
-          customer_email: user?.email || order.customer_email || undefined,
-          payment_status: 'unpaid',
-          order_status: 'pending'
-        };
-
         const customerRecipient = order.customer_whatsapp || phone;
         const adminRecipients = crm.autoAlertAdminOnOrder ? crm.adminAlertRecipients : [];
 
@@ -533,16 +562,16 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
           jobs.push(
             dispatch(sql, {
               recipient: customerRecipient,
-              text: buildServerOrderWhatsAppMessage('order_confirmed', fullOrder, settings),
+              text: buildServerOrderWhatsAppMessage('order_confirmed', fullOrder, orderSettings),
               type: 'order_confirmed',
               orderId: safeOrderId,
               orderNumber: safeOrderNumber,
-              settings
+              settings: orderSettings
             })
           );
         }
         if (crm.configured && adminRecipients.length > 0) {
-          const adminText = buildServerOrderWhatsAppMessage('admin_new_order', fullOrder, settings);
+          const adminText = buildServerOrderWhatsAppMessage('admin_new_order', fullOrder, orderSettings);
           for (const adminPhone of adminRecipients) {
             jobs.push(
               dispatch(sql, {
@@ -551,13 +580,27 @@ export async function execute(req: any, res: any, body: any, deps?: any) {
                 type: 'admin_new_order',
                 orderId: safeOrderId,
                 orderNumber: safeOrderNumber,
-                settings
+                settings: orderSettings
               })
             );
           }
         }
         if (jobs.length > 0) await Promise.allSettled(jobs);
       } catch {}
+    }
+    if (saved && useGateway && !deps?.skipGatewayCheckout) {
+      const gatewaySession = await createGatewayCheckoutSession(sql, {
+        order: fullOrder,
+        baseUrl: resolveRequestOrigin(req),
+        settings: orderSettings,
+        fetchFn: deps?.fetch
+      });
+      return {
+        success: true,
+        id: safeOrderId,
+        order_number: safeOrderNumber,
+        payment: gatewaySession
+      };
     }
     return saved;
   }

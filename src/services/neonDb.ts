@@ -190,7 +190,7 @@ export const neonDb = {
     return callAction('updateStoreSettings', [settings]);
   },
 
-  async createOrder(order: Order): Promise<boolean> { return callStore('createOrder', [order]); },
+  async createOrder(order: Order): Promise<any> { return callStore('createOrder', [order]); },
   async getOrders(): Promise<Order[]> { return callStore('getOrders', []); },
   async trackOrder(number: string, phone: string): Promise<Order | null> { return callStore('trackOrder', [number, phone]); },
   async cancelOrder(orderId: string, reason: string, by: 'customer_whatsapp' | 'admin') {
@@ -275,5 +275,10 @@ export const neonDb = {
   },
   async sendTestWhatsApp(phone: string, text: string) {
     return callAction('sendTestWhatsApp', [phone, text]);
-  }
+  },
+
+  // Payment Gateway Config RPCs (Kashier / Paymob)
+  async getPaymentGatewayAdminConfig() { return callStore('getPaymentGatewayAdminConfig', []); },
+  async savePaymentGatewayConfig(config: any) { return callAction('savePaymentGatewayConfig', [config]); },
+  async testPaymentGatewayConfig() { return callAction('testPaymentGatewayConfig', []); }
 };

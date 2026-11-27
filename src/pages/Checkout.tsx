@@ -158,7 +158,7 @@ export const Checkout: React.FC = () => {
     }
     setSubmitting(true);
     try {
-      await createOrder({
+      const created = await createOrder({
         customer_name: customerName.trim(),
         customer_phone: phone,
         customer_whatsapp: normalizePhone(customerWhatsapp) || phone,
@@ -178,6 +178,10 @@ export const Checkout: React.FC = () => {
         payment_method: paymentMethod,
         payment_reference: paymentReference.trim() || undefined
       });
+      if (created.checkout_url && typeof window !== 'undefined') {
+        window.location.assign(created.checkout_url);
+        return;
+      }
       confetti({ particleCount: 70, spread: 60, origin: { y: 0.7 } });
       navigate('order-success');
     } catch (err: any) {
@@ -405,43 +409,121 @@ export const Checkout: React.FC = () => {
           </div>
 
           <div className="bg-white border border-gray-200 rounded-2xl p-6 space-y-4">
-            <h2 className="font-bold text-base text-[#252a31] flex items-center gap-2">
-              <CreditCard className="w-5 h-5 text-[#fe9931]" />
-              <span>طريقة الدفع</span>
-            </h2>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {[
-                { id: 'cod', title: 'الدفع عند الاستلام', sub: 'معاينة الطلب عند الاستلام' },
-                { id: 'instapay', title: 'إنستاباي (InstaPay)', sub: 'تحويل فوري على 01003732029' },
-                { id: 'vodafone_cash', title: 'فودافون كاش / محفظة', sub: 'تحويل على 01003732029' },
-                { id: 'card', title: 'بطاقة بنكية (أونلاين)', sub: 'فيزا / ماستركارد' }
-              ].map(m => (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => setPaymentMethod(m.id as PaymentMethod)}
-                  className={`p-3.5 rounded-xl border text-right transition ${
-                    paymentMethod === m.id ? 'border-[#fe9931] bg-[#fe9931]/5' : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  <p className="font-bold text-sm text-[#252a31] flex items-center justify-between">
-                    <span>{m.title}</span>
-                    {paymentMethod === m.id && <CheckCircle2 className="w-4 h-4 text-[#fe9931]" />}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">{m.sub}</p>
-                </button>
-              ))}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-bold text-base text-[#252a31] flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-[#fe9931]" />
+                <span>طريقة الدفع</span>
+              </h2>
+              {settings.payment_gateway_public?.configured && (
+                <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200">
+                  دفع إلكتروني مؤمّن عبر {settings.payment_gateway_public.provider === 'paymob' ? 'Paymob' : 'Kashier'}
+                </span>
+              )}
             </div>
 
-            {(paymentMethod === 'instapay' || paymentMethod === 'vodafone_cash') && (
-              <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">رقم المرجع / الرقم المحول منه</label>
-                <input type="text" value={paymentReference} onChange={e => setPaymentReference(e.target.value)}
-                  placeholder="أدخل رقم العملية أو الرقم المحول منه"
-                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-[#fe9931]" />
-              </div>
-            )}
+            {(() => {
+              const gwMethods = settings.payment_gateway_public?.methods || { card: false, wallet: false, instapay: false };
+              const gwName = settings.payment_gateway_public?.provider === 'paymob' ? 'Paymob' : 'Kashier';
+              const options: Array<{
+                id: PaymentMethod;
+                title: string;
+                sub: string;
+                badge?: string;
+                disabled?: boolean;
+              }> = [
+                { id: 'cod', title: 'الدفع عند الاستلام', sub: 'معاينة الطلب عند الاستلام' },
+                {
+                  id: 'card',
+                  title: 'بطاقة بنكية (Visa / Mastercard / ميزة)',
+                  sub: gwMethods.card
+                    ? `دفع إلكتروني آمن مباشرة عبر ${gwName}`
+                    : 'قريباً — جاهز للتفعيل فور ربط بوابة الدفع',
+                  badge: gwMethods.card ? 'فوري أونلاين' : 'قريباً',
+                  disabled: !gwMethods.card
+                },
+                {
+                  id: 'vodafone_cash',
+                  title: 'فودافون كاش / محافظ إلكترونية',
+                  sub: gwMethods.wallet
+                    ? `تحصيل فوري أونلاين عبر ${gwName}`
+                    : `تحويل يدوي على ${settings.whatsapp_number || '01003732029'}`,
+                  badge: gwMethods.wallet ? 'تأكيد تلقائي' : undefined
+                },
+                {
+                  id: 'instapay',
+                  title: 'إنستاباي (InstaPay)',
+                  sub: gwMethods.instapay
+                    ? `تحصيل فوري أونلاين عبر ${gwName}`
+                    : `تحويل فوري على ${settings.phone || '01003732029'}`,
+                  badge: gwMethods.instapay ? 'تأكيد تلقائي' : undefined
+                }
+              ];
+
+              const showManualRef =
+                (paymentMethod === 'vodafone_cash' && !gwMethods.wallet) ||
+                (paymentMethod === 'instapay' && !gwMethods.instapay);
+              const redirectOnline =
+                (paymentMethod === 'card' && gwMethods.card) ||
+                (paymentMethod === 'vodafone_cash' && gwMethods.wallet) ||
+                (paymentMethod === 'instapay' && gwMethods.instapay);
+
+              return (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {options.map(m => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        disabled={m.disabled}
+                        onClick={() => !m.disabled && setPaymentMethod(m.id)}
+                        className={`p-3.5 rounded-xl border text-right transition ${
+                          m.disabled
+                            ? 'border-gray-200 bg-gray-50 opacity-65 cursor-not-allowed'
+                            : paymentMethod === m.id
+                              ? 'border-[#fe9931] bg-[#fe9931]/5 shadow-sm'
+                              : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                      >
+                        <p className="font-bold text-sm text-[#252a31] flex items-center justify-between gap-2">
+                          <span>{m.title}</span>
+                          {m.badge ? (
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                                m.disabled ? 'bg-gray-200 text-gray-600' : 'bg-[#fe9931]/15 text-[#fe9931]'
+                              }`}
+                            >
+                              {m.badge}
+                            </span>
+                          ) : (
+                            paymentMethod === m.id && <CheckCircle2 className="w-4 h-4 text-[#fe9931] shrink-0" />
+                          )}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">{m.sub}</p>
+                      </button>
+                    ))}
+                  </div>
+
+                  {redirectOnline && (
+                    <div className="p-3.5 rounded-xl bg-green-50 border border-green-200 text-xs text-green-800 font-semibold">
+                      سيتم تحويلك إلى صفحة الدفع المؤمّنة الخاصة بـ {gwName} لإدخال بيانات البطاقة أو إتمام الدفع وتأكيد طلبك تلقائياً.
+                    </div>
+                  )}
+
+                  {showManualRef && (
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">رقم المرجع / الرقم المحول منه</label>
+                      <input
+                        type="text"
+                        value={paymentReference}
+                        onChange={e => setPaymentReference(e.target.value)}
+                        placeholder="أدخل رقم العملية أو الرقم المحول منه"
+                        className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-[#fe9931]"
+                      />
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </div>
 

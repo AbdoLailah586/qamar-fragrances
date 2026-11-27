@@ -10,6 +10,7 @@ import storeHandler from './api/store';
 import ogProductHandler from './api/og-product.js';
 import metaFeedHandler from './api/meta-feed.js';
 import sitemapHandler from './api/sitemap.js';
+import paymentCallbackHandler from './api/payment-callback';
 
 const envPath = resolve(process.cwd(), '.env');
 if (existsSync(envPath)) {
@@ -67,6 +68,7 @@ function devApiPlugin(): Plugin {
             else if (url === '/api/og-product') await ogProductHandler(req, mockRes);
             else if (url === '/api/meta-feed') await metaFeedHandler(req, mockRes);
             else if (url === '/api/sitemap') await sitemapHandler(req, mockRes);
+            else if (url === '/api/payment-callback') await paymentCallbackHandler(req, mockRes);
             else next();
           } catch (err: any) {
             mockRes.status(500).json({ success: false, error: err.message });

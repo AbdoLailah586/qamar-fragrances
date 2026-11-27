@@ -9,6 +9,7 @@ import { neonDb } from '../../services/neonDb';
 import { whatsappUrl } from '../../utils/whatsappService';
 import { UsersCrmPanel } from './UsersCrmPanel';
 import { MarketingAdToolsCard } from './MarketingAdToolsCard';
+import { PaymentGatewaySettingsCard } from './PaymentGatewaySettingsCard';
 import type { WhatsAppNotificationLog, WhatsAppTemplates } from '../../types';
 
 const TEMPLATE_LABELS: { key: keyof WhatsAppTemplates; title: string; desc: string }[] = [
@@ -415,6 +416,7 @@ export const SystemAdminPanel: React.FC<{ section: 'users' | 'security' | 'setti
           <input type="checkbox" checked={formSettings.announcement_enabled} onChange={e => setFormSettings({ ...formSettings, announcement_enabled: e.target.checked })} className="accent-[#fe9931]" />
           تفعيل شريط الإعلانات العلوي ({formSettings.announcement_text})
         </label>
+        <PaymentGatewaySettingsCard />
         <MarketingAdToolsCard formSettings={formSettings} setFormSettings={setFormSettings} />
         <button type="submit" className="px-6 py-2.5 rounded-full bg-[#fe9931] text-white font-bold">حفظ الإعدادات</button>
       </form>

@@ -192,7 +192,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [recentlyViewedIds, setRecentlyViewedIds] = useState<string[]>(() => readStoredArray<string>('qamar_recently_viewed'));
   const [visitorAttribution, setVisitorAttribution] = useState<VisitorAttribution>(() => getOrCaptureVisitorAttribution());
   const [orders, setOrders] = useState<Order[]>([]);
-  const [currentOrder, setCurrentOrder] = useState<Order | null>(null);
+  const [currentOrder, setCurrentOrder] = useState<Order | null>(() => {
+    try {
+      const raw = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('qamar_last_order') : null;
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
   const [activeCarts, setActiveCarts] = useState<any[]>([]);
 
   const initialRoute = parseUrlRoute();
@@ -554,8 +561,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
-    const ok = await neonDb.createOrder(order);
-    if (!ok) throw new Error('تعذر تأكيد الطلب. تحقق من توفر الكميات والأسعار الحالية.');
+    const res = await neonDb.createOrder(order);
+    if (!res) throw new Error('تعذر تأكيد الطلب. تحقق من توفر الكميات والأسعار الحالية.');
+    const checkoutUrl = typeof res === 'object' ? res?.payment?.checkoutUrl : undefined;
+    const savedOrder: Order = { ...order, checkout_url: checkoutUrl };
     trackMetaEvent('Purchase', {
       content_ids: order.items.map(i => i.product.id),
       num_items: order.items.reduce((s, i) => s + i.quantity, 0),
@@ -563,10 +572,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       currency: 'EGP',
       order_id: order.order_number
     });
-    setCurrentOrder(order);
-    setOrders(prev => [order, ...prev]);
+    setCurrentOrder(savedOrder);
+    try {
+      if (typeof sessionStorage !== 'undefined') sessionStorage.setItem('qamar_last_order', JSON.stringify(savedOrder));
+    } catch {}
+    setOrders(prev => [savedOrder, ...prev]);
     clearCart();
-    return order;
+    return savedOrder;
   };
 
   const cancelOrder = async (orderId: string, reason: string, by: 'customer_whatsapp' | 'admin' = 'admin') => {

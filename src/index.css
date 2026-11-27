@@ -169,6 +169,42 @@ a {
   animation: qamarFloatSoft 3.6s ease-in-out infinite;
 }
 
+/* iPhone iOS 26 Liquid Glass Floating Dock */
+.qamar-liquid-glass-dock {
+  background: linear-gradient(
+    155deg,
+    rgba(255, 255, 255, 0.74) 0%,
+    rgba(248, 250, 252, 0.44) 50%,
+    rgba(255, 255, 255, 0.68) 100%
+  );
+  backdrop-filter: blur(26px) saturate(195%);
+  -webkit-backdrop-filter: blur(26px) saturate(195%);
+  border: 1px solid rgba(255, 255, 255, 0.86);
+  box-shadow:
+    0 18px 42px -10px rgba(37, 42, 49, 0.24),
+    0 6px 18px -4px rgba(254, 153, 49, 0.14),
+    inset 0 1.5px 1px rgba(255, 255, 255, 0.96),
+    inset 0 -1.5px 3px rgba(37, 42, 49, 0.07);
+}
+.qamar-liquid-glass-sheen {
+  background: radial-gradient(
+    ellipse 78% 55% at 50% 0%,
+    rgba(255, 255, 255, 0.85) 0%,
+    rgba(255, 255, 255, 0) 75%
+  );
+}
+.qamar-liquid-glass-pill {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.96) 0%,
+    rgba(255, 248, 238, 0.76) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  box-shadow:
+    0 4px 12px rgba(254, 153, 49, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 1);
+}
+
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   .qamar-page-enter,
